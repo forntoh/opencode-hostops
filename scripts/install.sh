@@ -283,6 +283,25 @@ if ! id "$HOST_USER" >/dev/null 2>&1 && [[ "$HOST_USER_HOME" == "$APP_DIR/system
   fi
 fi
 
+if id "$HOST_USER" >/dev/null 2>&1; then
+  existing_home="$(getent passwd "$HOST_USER" | cut -d: -f6)"
+  if [[ -n "$existing_home" ]] && ! path_writable_or_creatable "$existing_home/.ssh"; then
+    if [[ -n "${SUDO_USER:-}" ]] && [[ "$HOST_USER" != "$SUDO_USER" ]] && id "$SUDO_USER" >/dev/null 2>&1; then
+      printf 'Using existing sudo user %s because %s has an unwritable home directory.\n' "$SUDO_USER" "$HOST_USER" >&2
+      HOST_USER="$SUDO_USER"
+      HOST_USER_HOME="$(getent passwd "$HOST_USER" | cut -d: -f6)"
+      HOST_USER_FALLBACKED=true
+    elif [[ "$HOST_USER" != "root" ]]; then
+      printf 'Using root because %s has an unwritable home directory.\n' "$HOST_USER" >&2
+      HOST_USER="root"
+      HOST_USER_HOME="$(getent passwd root | cut -d: -f6)"
+      HOST_USER_FALLBACKED=true
+    fi
+  else
+    HOST_USER_HOME="$existing_home"
+  fi
+fi
+
 ensure_parent_dir "$CONFIG_PATH"
 cat > "$CONFIG_PATH" <<EOF
 OPENCODE_APP_ROOT=${APP_ROOT}
