@@ -187,7 +187,7 @@ generate_password() {
   if command_exists openssl; then
     openssl rand -base64 24 | tr -d '\n'
   else
-    tr -dc 'A-Za-z0-9_@%+=:,.-' < /dev/urandom | head -c 32
+    od -An -N 16 -tx1 /dev/urandom | tr -d ' \n'
   fi
 }
 
