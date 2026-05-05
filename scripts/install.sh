@@ -183,6 +183,11 @@ command_exists() {
   command -v "$1" >/dev/null 2>&1
 }
 
+ensure_parent_dir() {
+  local path="$1"
+  mkdir -p "$(dirname "$path")"
+}
+
 generate_password() {
   if command_exists openssl; then
     openssl rand -base64 24 | tr -d '\n'
@@ -224,11 +229,13 @@ collect_install_settings "$OPENCODE_PASSWORD"
 
 mkdir -p "$APP_DIR"/{config,share,state,workspace,ssh}
 
+ensure_parent_dir "$CONFIG_PATH"
 cat > "$CONFIG_PATH" <<EOF
 OPENCODE_APP_ROOT=${APP_ROOT}
 EOF
 chmod 644 "$CONFIG_PATH"
 
+ensure_parent_dir "$HOST_HELPER_PATH"
 cat > "$HOST_HELPER_PATH" <<'HOST_HELPER_EOF'
 #!/usr/bin/env bash
 set -Eeuo pipefail
@@ -917,6 +924,7 @@ dispatch "$@"
 HOST_HELPER_EOF
 chmod 755 "$HOST_HELPER_PATH"
 
+ensure_parent_dir "$SSH_ENTRYPOINT_PATH"
 cat > "$SSH_ENTRYPOINT_PATH" <<'SSH_ENTRYPOINT_EOF'
 #!/usr/bin/env bash
 set -Eeuo pipefail
@@ -962,6 +970,7 @@ exec sudo /usr/local/sbin/opencode-host-helper "${args[@]}"
 SSH_ENTRYPOINT_EOF
 chmod 755 "$SSH_ENTRYPOINT_PATH"
 
+ensure_parent_dir "$HOSTCTL_PATH"
 cat > "$HOSTCTL_PATH" <<'HOST_WRAPPER_EOF'
 #!/usr/bin/env bash
 set -Eeuo pipefail
@@ -972,6 +981,7 @@ HOST_WRAPPER_EOF
 chmod 755 "$HOSTCTL_PATH"
 
 if [[ "$INSTALL_OPENCODE_LAUNCHER" == "true" ]]; then
+  ensure_parent_dir "$OPENCODE_LAUNCHER_PATH"
   cat > "$OPENCODE_LAUNCHER_PATH" <<'OPENCODE_LAUNCHER_EOF'
 #!/usr/bin/env bash
 set -Eeuo pipefail
