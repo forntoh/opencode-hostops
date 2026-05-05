@@ -254,6 +254,7 @@ APP_OWNER_UID="${PUID:-${SUDO_UID:-1000}}"
 APP_OWNER_GID="${PGID:-${SUDO_GID:-1000}}"
 OPENCODE_PASSWORD="${OPENCODE_SERVER_PASSWORD:-$(generate_password)}"
 HOST_USER_HOME=""
+HOST_USER_FALLBACKED=false
 
 collect_install_settings "$OPENCODE_PASSWORD"
 
@@ -266,6 +267,15 @@ HOSTCTL_PATH="$(pick_install_path "hostctl wrapper" "$HOSTCTL_PATH" "$APP_DIR/bi
 HOST_USER_HOME="$(pick_install_path "host user home" "/home/$HOST_USER" "$APP_DIR/system/$HOST_USER-home")"
 if [[ "$INSTALL_OPENCODE_LAUNCHER" == "true" ]]; then
   OPENCODE_LAUNCHER_PATH="$(pick_install_path "opencode launcher" "$OPENCODE_LAUNCHER_PATH" "$APP_DIR/bin/opencode")"
+fi
+
+if ! id "$HOST_USER" >/dev/null 2>&1 && [[ "$HOST_USER_HOME" == "$APP_DIR/system/$HOST_USER-home" ]]; then
+  if [[ -n "${SUDO_USER:-}" ]] && id "$SUDO_USER" >/dev/null 2>&1; then
+    printf 'Using existing sudo user %s because a dedicated host user cannot be created on this read-only system.\n' "$SUDO_USER" >&2
+    HOST_USER="$SUDO_USER"
+    HOST_USER_HOME="$(getent passwd "$HOST_USER" | cut -d: -f6)"
+    HOST_USER_FALLBACKED=true
+  fi
 fi
 
 ensure_parent_dir "$CONFIG_PATH"
@@ -1436,11 +1446,14 @@ mkdir -p "$HOST_USER_HOME/.ssh"
 chown "$HOST_USER:$HOST_USER" "$HOST_USER_HOME"
 chmod 700 "$HOST_USER_HOME/.ssh"
 PUB="$(cat "$APP_DIR/ssh/id_ed25519.pub")"
-cat > "$HOST_USER_HOME/.ssh/authorized_keys" <<EOF
-command="$SSH_ENTRYPOINT_PATH",no-agent-forwarding,no-X11-forwarding,no-port-forwarding,no-pty $PUB
-EOF
+AUTHORIZED_KEYS_PATH="$HOST_USER_HOME/.ssh/authorized_keys"
+AUTHORIZED_KEY_LINE="command=\"$SSH_ENTRYPOINT_PATH\",no-agent-forwarding,no-X11-forwarding,no-port-forwarding,no-pty $PUB"
+touch "$AUTHORIZED_KEYS_PATH"
+if ! grep -Fqx "$AUTHORIZED_KEY_LINE" "$AUTHORIZED_KEYS_PATH"; then
+  printf '%s\n' "$AUTHORIZED_KEY_LINE" >> "$AUTHORIZED_KEYS_PATH"
+fi
 chown -R "$HOST_USER:$HOST_USER" "$HOST_USER_HOME/.ssh"
-chmod 600 "$HOST_USER_HOME/.ssh/authorized_keys"
+chmod 600 "$AUTHORIZED_KEYS_PATH"
 
 cat > /etc/sudoers.d/opencode-hostops <<EOF
 ${HOST_USER} ALL=(root) NOPASSWD: ${HOST_HELPER_PATH} *
@@ -1462,6 +1475,11 @@ printf '%s\n' "Host helper: $HOST_HELPER_PATH"
 printf '%s\n' "SSH entrypoint: $SSH_ENTRYPOINT_PATH"
 printf '%s\n' "Hostctl wrapper: $HOSTCTL_PATH"
 printf '%s\n' "Restricted host user home: $HOST_USER_HOME"
+if [[ "$HOST_USER_FALLBACKED" == "true" ]]; then
+  printf '%s\n' "Restricted host user: $HOST_USER (existing sudo user fallback)"
+else
+  printf '%s\n' "Restricted host user: $HOST_USER"
+fi
 if [[ "$INSTALL_OPENCODE_LAUNCHER" == "true" ]]; then
   printf '%s\n' "OpenCode launcher: $OPENCODE_LAUNCHER_PATH"
 fi
