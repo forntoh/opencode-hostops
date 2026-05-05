@@ -39,7 +39,7 @@ services:
       - ./share:/home/opencode/.local/share/opencode
       - ./state:/home/opencode/.local/state/opencode
       - ./workspace:/workspace
-      - ./ssh:/home/opencode/.ssh:ro
+      - ./ssh:/home/opencode/.ssh
 
     security_opt:
       - no-new-privileges:true

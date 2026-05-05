@@ -1225,7 +1225,7 @@ services:
       - ./share:/home/opencode/.local/share/opencode
       - ./state:/home/opencode/.local/state/opencode
       - ./workspace:/workspace
-      - ./ssh:/home/opencode/.ssh:ro
+      - ./ssh:/home/opencode/.ssh
 
     security_opt:
       - no-new-privileges:true
@@ -1459,6 +1459,8 @@ Host hostops
   RequestTTY no
 EOF
 chmod 600 "$APP_DIR/ssh/config"
+touch "$APP_DIR/ssh/known_hosts"
+chmod 600 "$APP_DIR/ssh/known_hosts"
 
 cat > "$APP_DIR/.env" <<EOF
 OPENCODE_SERVER_USERNAME=opencode
