@@ -275,6 +275,11 @@ if ! id "$HOST_USER" >/dev/null 2>&1 && [[ "$HOST_USER_HOME" == "$APP_DIR/system
     HOST_USER="$SUDO_USER"
     HOST_USER_HOME="$(getent passwd "$HOST_USER" | cut -d: -f6)"
     HOST_USER_FALLBACKED=true
+  else
+    printf 'Using root because a dedicated host user cannot be created on this read-only system.\n' >&2
+    HOST_USER="root"
+    HOST_USER_HOME="$(getent passwd root | cut -d: -f6)"
+    HOST_USER_FALLBACKED=true
   fi
 fi
 
@@ -1476,7 +1481,7 @@ printf '%s\n' "SSH entrypoint: $SSH_ENTRYPOINT_PATH"
 printf '%s\n' "Hostctl wrapper: $HOSTCTL_PATH"
 printf '%s\n' "Restricted host user home: $HOST_USER_HOME"
 if [[ "$HOST_USER_FALLBACKED" == "true" ]]; then
-  printf '%s\n' "Restricted host user: $HOST_USER (existing sudo user fallback)"
+  printf '%s\n' "Restricted host user: $HOST_USER (existing account fallback)"
 else
   printf '%s\n' "Restricted host user: $HOST_USER"
 fi
