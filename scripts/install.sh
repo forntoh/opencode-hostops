@@ -254,6 +254,7 @@ APP_OWNER_UID="${PUID:-${SUDO_UID:-1000}}"
 APP_OWNER_GID="${PGID:-${SUDO_GID:-1000}}"
 OPENCODE_PASSWORD="${OPENCODE_SERVER_PASSWORD:-$(generate_password)}"
 HOST_USER_HOME=""
+HOST_USER_GROUP=""
 HOST_USER_FALLBACKED=false
 
 collect_install_settings "$OPENCODE_PASSWORD"
@@ -301,6 +302,8 @@ if id "$HOST_USER" >/dev/null 2>&1; then
     HOST_USER_HOME="$existing_home"
   fi
 fi
+
+HOST_USER_GROUP="$(id -gn "$HOST_USER")"
 
 ensure_parent_dir "$CONFIG_PATH"
 cat > "$CONFIG_PATH" <<EOF
@@ -1467,7 +1470,7 @@ else
 fi
 
 mkdir -p "$HOST_USER_HOME/.ssh"
-chown "$HOST_USER:$HOST_USER" "$HOST_USER_HOME"
+chown "$HOST_USER:$HOST_USER_GROUP" "$HOST_USER_HOME"
 chmod 700 "$HOST_USER_HOME/.ssh"
 PUB="$(cat "$APP_DIR/ssh/id_ed25519.pub")"
 AUTHORIZED_KEYS_PATH="$HOST_USER_HOME/.ssh/authorized_keys"
@@ -1476,7 +1479,7 @@ touch "$AUTHORIZED_KEYS_PATH"
 if ! grep -Fqx "$AUTHORIZED_KEY_LINE" "$AUTHORIZED_KEYS_PATH"; then
   printf '%s\n' "$AUTHORIZED_KEY_LINE" >> "$AUTHORIZED_KEYS_PATH"
 fi
-chown -R "$HOST_USER:$HOST_USER" "$HOST_USER_HOME/.ssh"
+chown -R "$HOST_USER:$HOST_USER_GROUP" "$HOST_USER_HOME/.ssh"
 chmod 600 "$AUTHORIZED_KEYS_PATH"
 
 cat > /etc/sudoers.d/opencode-hostops <<EOF
