@@ -256,6 +256,7 @@ OPENCODE_PASSWORD="${OPENCODE_SERVER_PASSWORD:-$(generate_password)}"
 HOST_USER_HOME=""
 HOST_USER_GROUP=""
 HOST_USER_FALLBACKED=false
+DOCKER_CONFIG_PATH="${DOCKER_CONFIG:-/root/.docker}"
 
 collect_install_settings "$OPENCODE_PASSWORD"
 
@@ -266,6 +267,7 @@ HOST_HELPER_PATH="$(pick_install_path "host helper" "$HOST_HELPER_PATH" "$APP_DI
 SSH_ENTRYPOINT_PATH="$(pick_install_path "SSH entrypoint" "$SSH_ENTRYPOINT_PATH" "$APP_DIR/bin/opencode-ssh-entrypoint")"
 HOSTCTL_PATH="$(pick_install_path "hostctl wrapper" "$HOSTCTL_PATH" "$APP_DIR/bin/hostctl")"
 HOST_USER_HOME="$(pick_install_path "host user home" "/home/$HOST_USER" "$APP_DIR/system/$HOST_USER-home")"
+DOCKER_CONFIG_PATH="$(pick_install_path "docker config" "$DOCKER_CONFIG_PATH" "$APP_DIR/system/docker-config")"
 if [[ "$INSTALL_OPENCODE_LAUNCHER" == "true" ]]; then
   OPENCODE_LAUNCHER_PATH="$(pick_install_path "opencode launcher" "$OPENCODE_LAUNCHER_PATH" "$APP_DIR/bin/opencode")"
 fi
@@ -304,6 +306,8 @@ if id "$HOST_USER" >/dev/null 2>&1; then
 fi
 
 HOST_USER_GROUP="$(id -gn "$HOST_USER")"
+mkdir -p "$DOCKER_CONFIG_PATH"
+export DOCKER_CONFIG="$DOCKER_CONFIG_PATH"
 
 ensure_parent_dir "$CONFIG_PATH"
 cat > "$CONFIG_PATH" <<EOF
@@ -318,6 +322,7 @@ set -Eeuo pipefail
 
 # Optional host-wide configuration written by scripts/install.sh.
 HOSTOPS_CONFIG_PATH="__CONFIG_PATH__"
+export DOCKER_CONFIG="__DOCKER_CONFIG_PATH__"
 
 if [[ -f "$HOSTOPS_CONFIG_PATH" ]]; then
   # shellcheck disable=SC1091
@@ -1001,6 +1006,7 @@ fi
 dispatch "$@"
 HOST_HELPER_EOF
 sed -i "s|__CONFIG_PATH__|$(escape_sed_replacement "$CONFIG_PATH")|g" "$HOST_HELPER_PATH"
+sed -i "s|__DOCKER_CONFIG_PATH__|$(escape_sed_replacement "$DOCKER_CONFIG_PATH")|g" "$HOST_HELPER_PATH"
 chmod 755 "$HOST_HELPER_PATH"
 
 ensure_parent_dir "$SSH_ENTRYPOINT_PATH"
@@ -1501,6 +1507,7 @@ printf '%s\n' "Config file: $CONFIG_PATH"
 printf '%s\n' "Host helper: $HOST_HELPER_PATH"
 printf '%s\n' "SSH entrypoint: $SSH_ENTRYPOINT_PATH"
 printf '%s\n' "Hostctl wrapper: $HOSTCTL_PATH"
+printf '%s\n' "Docker config: $DOCKER_CONFIG_PATH"
 printf '%s\n' "Restricted host user home: $HOST_USER_HOME"
 if [[ "$HOST_USER_FALLBACKED" == "true" ]]; then
   printf '%s\n' "Restricted host user: $HOST_USER (existing account fallback)"
