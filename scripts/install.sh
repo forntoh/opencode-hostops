@@ -1458,16 +1458,6 @@ chmod 700 "$APP_DIR/ssh"
 chmod 600 "$APP_DIR/ssh/id_ed25519"
 chmod 644 "$APP_DIR/ssh/id_ed25519.pub"
 
-cat > "$APP_DIR/ssh/config" <<EOF
-Host hostops
-  HostName host.docker.internal
-  User ${HOST_USER}
-  IdentityFile ~/.ssh/id_ed25519
-  StrictHostKeyChecking accept-new
-  UserKnownHostsFile ~/.ssh/known_hosts
-  RequestTTY no
-EOF
-chmod 600 "$APP_DIR/ssh/config"
 touch "$APP_DIR/ssh/known_hosts"
 chmod 600 "$APP_DIR/ssh/known_hosts"
 
@@ -1489,6 +1479,17 @@ if ! id "$HOST_USER" >/dev/null 2>&1; then
 else
   HOST_USER_HOME="$(getent passwd "$HOST_USER" | cut -d: -f6)"
 fi
+
+cat > "$APP_DIR/ssh/config" <<EOF
+Host hostops
+  HostName host.docker.internal
+  User ${HOST_USER}
+  IdentityFile ~/.ssh/id_ed25519
+  StrictHostKeyChecking accept-new
+  UserKnownHostsFile ~/.ssh/known_hosts
+  RequestTTY no
+EOF
+chmod 600 "$APP_DIR/ssh/config"
 
 mkdir -p "$HOST_USER_HOME/.ssh"
 chown "$HOST_USER:$HOST_USER_GROUP" "$HOST_USER_HOME"
