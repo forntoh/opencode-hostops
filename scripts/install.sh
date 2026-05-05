@@ -35,7 +35,7 @@ lower() {
 tty_print() {
   local message="$1"
   if can_prompt; then
-    printf '%s' "$message" >&3
+    printf '%b' "$message" >&3
   fi
 }
 
