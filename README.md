@@ -74,6 +74,8 @@ curl -fsSL https://raw.githubusercontent.com/forntoh/opencode-hostops/main/scrip
 
 The installer will prompt for the main settings. Press Enter to keep each default value.
 
+On hosts with read-only system paths such as some ZimaOS installs, the installer automatically falls back to writable paths under `APP_DIR` for the helper scripts, launcher, and Docker config.
+
 With custom paths:
 
 ```bash
@@ -92,6 +94,10 @@ sudo ./scripts/install.sh
 ```
 
 This local installer flow uses the same interactive prompts and defaults.
+
+Rerunning the installer is safe for normal updates and retries. It rewrites the generated config files, rebuilds and restarts the container, and keeps the existing app data under `APP_DIR`. It does not delete your workspace, config, or state directories.
+
+If the installer falls back to an existing account because the host cannot create a dedicated `opencode-host` user, rerunning it will keep using that fallback account until the host paths become writable or you choose different settings.
 
 The installer will create the app directory, install the host gateway scripts, configure the restricted SSH user, create the OpenCode container files, build the container, and print the generated web password at the end.
 

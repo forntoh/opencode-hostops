@@ -1503,6 +1503,8 @@ echo
 printf '%s\n' "opencode-hostops installed."
 printf '%s\n' "App directory: $APP_DIR"
 printf '%s\n' "App root inspected by hostctl: $APP_ROOT"
+echo
+printf '%s\n' "Host integration:"
 printf '%s\n' "Config file: $CONFIG_PATH"
 printf '%s\n' "Host helper: $HOST_HELPER_PATH"
 printf '%s\n' "SSH entrypoint: $SSH_ENTRYPOINT_PATH"
@@ -1510,14 +1512,15 @@ printf '%s\n' "Hostctl wrapper: $HOSTCTL_PATH"
 printf '%s\n' "Docker config: $DOCKER_CONFIG_PATH"
 printf '%s\n' "Restricted host user home: $HOST_USER_HOME"
 if [[ "$HOST_USER_FALLBACKED" == "true" ]]; then
-  printf '%s\n' "Restricted host user: $HOST_USER (existing account fallback)"
+  printf '%s\n' "Restricted host user: $HOST_USER (existing account fallback on read-only host)"
 else
   printf '%s\n' "Restricted host user: $HOST_USER"
 fi
 if [[ "$INSTALL_OPENCODE_LAUNCHER" == "true" ]]; then
   printf '%s\n' "OpenCode launcher: $OPENCODE_LAUNCHER_PATH"
 fi
-printf '%s\n' "Web UI: http://<your-host-ip>:$OPENCODE_PORT"
+echo
+printf '%s\n' "OpenCode web UI: http://<your-host-ip>:$OPENCODE_PORT"
 printf '%s\n' "Username: opencode"
 printf '%s\n' "Password: $OPENCODE_PASSWORD"
 echo
