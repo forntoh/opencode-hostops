@@ -274,6 +274,13 @@ if [[ "$INSTALL_OPENCODE_LAUNCHER" == "true" ]]; then
   OPENCODE_LAUNCHER_PATH="$(pick_install_path "opencode launcher" "$OPENCODE_LAUNCHER_PATH" "$APP_DIR/bin/opencode")"
 fi
 
+if [[ "$HOST_USER_HOME" == "$APP_DIR/system/$HOST_USER-home" ]] && [[ -n "${SUDO_USER:-}" ]] && id "$SUDO_USER" >/dev/null 2>&1; then
+  printf 'Using existing sudo user %s because %s cannot use a writable /home path on this host.\n' "$SUDO_USER" "$HOST_USER" >&2
+  HOST_USER="$SUDO_USER"
+  HOST_USER_HOME="$(getent passwd "$HOST_USER" | cut -d: -f6)"
+  HOST_USER_FALLBACKED=true
+fi
+
 if ! id "$HOST_USER" >/dev/null 2>&1 && [[ "$HOST_USER_HOME" == "$APP_DIR/system/$HOST_USER-home" ]]; then
   if [[ -n "${SUDO_USER:-}" ]] && id "$SUDO_USER" >/dev/null 2>&1; then
     printf 'Using existing sudo user %s because a dedicated host user cannot be created on this read-only system.\n' "$SUDO_USER" >&2
@@ -296,11 +303,6 @@ if id "$HOST_USER" >/dev/null 2>&1; then
       HOST_USER="$SUDO_USER"
       HOST_USER_HOME="$(getent passwd "$HOST_USER" | cut -d: -f6)"
       HOST_USER_FALLBACKED=true
-    elif [[ "$HOST_USER_HOME" == "$APP_DIR/system/$HOST_USER-home" ]] && command_exists usermod; then
-      mkdir -p "$HOST_USER_HOME"
-      usermod -d "$HOST_USER_HOME" "$HOST_USER"
-      existing_home="$HOST_USER_HOME"
-      printf 'Updated %s home directory to %s because the original home was not writable.\n' "$HOST_USER" "$HOST_USER_HOME" >&2
     elif [[ "$HOST_USER" != "root" ]]; then
       printf 'Using root because %s has an unwritable home directory.\n' "$HOST_USER" >&2
       HOST_USER="root"
