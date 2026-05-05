@@ -188,6 +188,35 @@ ensure_parent_dir() {
   mkdir -p "$(dirname "$path")"
 }
 
+escape_sed_replacement() {
+  printf '%s' "$1" | sed 's/[&|]/\\&/g'
+}
+
+path_writable_or_creatable() {
+  local path="$1"
+  local dir
+
+  dir="$(dirname "$path")"
+  while [[ ! -d "$dir" && "$dir" != "/" ]]; do
+    dir="$(dirname "$dir")"
+  done
+
+  [[ -w "$dir" ]]
+}
+
+pick_install_path() {
+  local label="$1"
+  local preferred="$2"
+  local fallback="$3"
+
+  if path_writable_or_creatable "$preferred"; then
+    printf '%s' "$preferred"
+  else
+    printf 'Using %s at %s because %s is not writable.\n' "$label" "$fallback" "$preferred" >&2
+    printf '%s' "$fallback"
+  fi
+}
+
 generate_password() {
   if command_exists openssl; then
     openssl rand -base64 24 | tr -d '\n'
@@ -229,6 +258,14 @@ collect_install_settings "$OPENCODE_PASSWORD"
 
 mkdir -p "$APP_DIR"/{config,share,state,workspace,ssh}
 
+CONFIG_PATH="$(pick_install_path "config file" "$CONFIG_PATH" "$APP_DIR/config/opencode-hostops.env")"
+HOST_HELPER_PATH="$(pick_install_path "host helper" "$HOST_HELPER_PATH" "$APP_DIR/bin/opencode-host-helper")"
+SSH_ENTRYPOINT_PATH="$(pick_install_path "SSH entrypoint" "$SSH_ENTRYPOINT_PATH" "$APP_DIR/bin/opencode-ssh-entrypoint")"
+HOSTCTL_PATH="$(pick_install_path "hostctl wrapper" "$HOSTCTL_PATH" "$APP_DIR/bin/hostctl")"
+if [[ "$INSTALL_OPENCODE_LAUNCHER" == "true" ]]; then
+  OPENCODE_LAUNCHER_PATH="$(pick_install_path "opencode launcher" "$OPENCODE_LAUNCHER_PATH" "$APP_DIR/bin/opencode")"
+fi
+
 ensure_parent_dir "$CONFIG_PATH"
 cat > "$CONFIG_PATH" <<EOF
 OPENCODE_APP_ROOT=${APP_ROOT}
@@ -241,9 +278,11 @@ cat > "$HOST_HELPER_PATH" <<'HOST_HELPER_EOF'
 set -Eeuo pipefail
 
 # Optional host-wide configuration written by scripts/install.sh.
-if [[ -f /etc/opencode-hostops.env ]]; then
+HOSTOPS_CONFIG_PATH="__CONFIG_PATH__"
+
+if [[ -f "$HOSTOPS_CONFIG_PATH" ]]; then
   # shellcheck disable=SC1091
-  source /etc/opencode-hostops.env
+  source "$HOSTOPS_CONFIG_PATH"
 fi
 
 APP_ROOT="${OPENCODE_APP_ROOT:-/DATA/AppData}"
@@ -922,6 +961,7 @@ fi
 
 dispatch "$@"
 HOST_HELPER_EOF
+sed -i "s|__CONFIG_PATH__|$(escape_sed_replacement "$CONFIG_PATH")|g" "$HOST_HELPER_PATH"
 chmod 755 "$HOST_HELPER_PATH"
 
 ensure_parent_dir "$SSH_ENTRYPOINT_PATH"
@@ -1411,15 +1451,22 @@ echo
 printf '%s\n' "opencode-hostops installed."
 printf '%s\n' "App directory: $APP_DIR"
 printf '%s\n' "App root inspected by hostctl: $APP_ROOT"
+printf '%s\n' "Config file: $CONFIG_PATH"
+printf '%s\n' "Host helper: $HOST_HELPER_PATH"
+printf '%s\n' "SSH entrypoint: $SSH_ENTRYPOINT_PATH"
+printf '%s\n' "Hostctl wrapper: $HOSTCTL_PATH"
+if [[ "$INSTALL_OPENCODE_LAUNCHER" == "true" ]]; then
+  printf '%s\n' "OpenCode launcher: $OPENCODE_LAUNCHER_PATH"
+fi
 printf '%s\n' "Web UI: http://<your-host-ip>:$OPENCODE_PORT"
 printf '%s\n' "Username: opencode"
 printf '%s\n' "Password: $OPENCODE_PASSWORD"
 echo
 printf '%s\n' "Test commands:"
-printf '%s\n' "  hostctl health summary"
-printf '%s\n' "  hostctl app inventory"
+printf '%s\n' "  $HOSTCTL_PATH health summary"
+printf '%s\n' "  $HOSTCTL_PATH app inventory"
 printf '%s\n' "  docker exec -it $CONTAINER_NAME hostctl docker list"
 if [[ "$INSTALL_OPENCODE_LAUNCHER" == "true" ]]; then
-  printf '%s\n' "  opencode web-url"
-  printf '%s\n' "  opencode"
+  printf '%s\n' "  $OPENCODE_LAUNCHER_PATH web-url"
+  printf '%s\n' "  $OPENCODE_LAUNCHER_PATH"
 fi
