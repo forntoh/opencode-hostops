@@ -28,6 +28,10 @@ can_prompt() {
   [[ "$TTY_READY" == "true" ]]
 }
 
+lower() {
+  printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
+}
+
 tty_print() {
   local message="$1"
   if can_prompt; then
@@ -82,7 +86,7 @@ prompt_bool() {
     return 0
   fi
 
-  if [[ "${current,,}" == "true" ]]; then
+  if [[ "$(lower "$current")" == "true" ]]; then
     suffix="Y/n"
   else
     suffix="y/N"
@@ -91,7 +95,7 @@ prompt_bool() {
   while true; do
     tty_print "$label [$suffix]: "
     IFS= read -r -u 3 input || input=""
-    normalized="${input,,}"
+    normalized="$(lower "$input")"
 
     if [[ -z "$normalized" ]]; then
       printf '%s' "$current"
@@ -128,7 +132,9 @@ require_number() {
 
 require_bool() {
   local name="$1"
-  local value="${2,,}"
+  local value
+
+  value="$(lower "$2")"
 
   case "$value" in
     true|false)
