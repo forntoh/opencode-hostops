@@ -1426,7 +1426,8 @@ chmod 600 "$APP_DIR/.env"
 
 # Create restricted host user.
 if ! id "$HOST_USER" >/dev/null 2>&1; then
-  useradd -M -d "$HOST_USER_HOME" -s /bin/bash "$HOST_USER"
+  mkdir -p "$HOST_USER_HOME"
+  useradd -M -b "$(dirname "$HOST_USER_HOME")" -d "$HOST_USER_HOME" -s /bin/bash "$HOST_USER"
 else
   HOST_USER_HOME="$(getent passwd "$HOST_USER" | cut -d: -f6)"
 fi
