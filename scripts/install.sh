@@ -834,7 +834,7 @@ cron_cmd() {
         echo "# Managed by opencode-hostops. Do not edit manually."
         echo "SHELL=/bin/bash"
         echo "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-        printf '%s root /usr/local/sbin/opencode-host-helper --cron-run ' "$schedule"
+        printf '%s root __HOST_HELPER_PATH__ --cron-run ' "$schedule"
         printf '%q ' "$@"
         printf '>> %q 2>&1\n' "$CRON_LOG"
       } > "$f"
@@ -1018,6 +1018,7 @@ dispatch "$@"
 HOST_HELPER_EOF
 sed -i "s|__CONFIG_PATH__|$(escape_sed_replacement "$CONFIG_PATH")|g" "$HOST_HELPER_PATH"
 sed -i "s|__DOCKER_CONFIG_PATH__|$(escape_sed_replacement "$DOCKER_CONFIG_PATH")|g" "$HOST_HELPER_PATH"
+sed -i "s|__HOST_HELPER_PATH__|$(escape_sed_replacement "$HOST_HELPER_PATH")|g" "$HOST_HELPER_PATH"
 chmod 755 "$HOST_HELPER_PATH"
 
 ensure_parent_dir "$SSH_ENTRYPOINT_PATH"
@@ -1062,8 +1063,9 @@ done <<< "$decoded"
   exit 2
 }
 
-exec sudo /usr/local/sbin/opencode-host-helper "${args[@]}"
+exec sudo __HOST_HELPER_PATH__ "${args[@]}"
 SSH_ENTRYPOINT_EOF
+sed -i "s|__HOST_HELPER_PATH__|$(escape_sed_replacement "$HOST_HELPER_PATH")|g" "$SSH_ENTRYPOINT_PATH"
 chmod 755 "$SSH_ENTRYPOINT_PATH"
 
 ensure_parent_dir "$HOSTCTL_PATH"
@@ -1072,8 +1074,9 @@ cat > "$HOSTCTL_PATH" <<'HOST_WRAPPER_EOF'
 set -Eeuo pipefail
 
 # Host-side convenience command. This lets you run the same gateway manually.
-exec sudo /usr/local/sbin/opencode-host-helper "$@"
+exec sudo __HOST_HELPER_PATH__ "$@"
 HOST_WRAPPER_EOF
+sed -i "s|__HOST_HELPER_PATH__|$(escape_sed_replacement "$HOST_HELPER_PATH")|g" "$HOSTCTL_PATH"
 chmod 755 "$HOSTCTL_PATH"
 
 if [[ "$INSTALL_OPENCODE_LAUNCHER" == "true" ]]; then
