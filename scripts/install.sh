@@ -16,6 +16,155 @@ HOSTCTL_PATH="${HOSTCTL_PATH:-/usr/local/bin/hostctl}"
 HOST_HELPER_PATH="${HOST_HELPER_PATH:-/usr/local/sbin/opencode-host-helper}"
 SSH_ENTRYPOINT_PATH="${SSH_ENTRYPOINT_PATH:-/usr/local/sbin/opencode-ssh-entrypoint}"
 CONFIG_PATH="${CONFIG_PATH:-/etc/opencode-hostops.env}"
+TTY_READY=false
+
+init_prompt_tty() {
+  if exec 3<>/dev/tty; then
+    TTY_READY=true
+  fi
+}
+
+can_prompt() {
+  [[ "$TTY_READY" == "true" ]]
+}
+
+tty_print() {
+  local message="$1"
+  if can_prompt; then
+    printf '%s' "$message" >&3
+  fi
+}
+
+prompt_with_default() {
+  local label="$1"
+  local current="$2"
+  local input
+
+  if ! can_prompt; then
+    printf '%s' "$current"
+    return 0
+  fi
+
+  tty_print "$label [$current]: "
+  IFS= read -r -u 3 input || input=""
+  if [[ -z "$input" ]]; then
+    printf '%s' "$current"
+  else
+    printf '%s' "$input"
+  fi
+}
+
+prompt_password() {
+  local current="$1"
+  local input
+
+  if ! can_prompt; then
+    printf '%s' "$current"
+    return 0
+  fi
+
+  tty_print "Web UI password [press Enter to use generated password]: "
+  IFS= read -r -u 3 input || input=""
+  if [[ -z "$input" ]]; then
+    printf '%s' "$current"
+  else
+    printf '%s' "$input"
+  fi
+}
+
+prompt_bool() {
+  local label="$1"
+  local current="$2"
+  local input normalized suffix
+
+  if ! can_prompt; then
+    printf '%s' "$current"
+    return 0
+  fi
+
+  if [[ "${current,,}" == "true" ]]; then
+    suffix="Y/n"
+  else
+    suffix="y/N"
+  fi
+
+  while true; do
+    tty_print "$label [$suffix]: "
+    IFS= read -r -u 3 input || input=""
+    normalized="${input,,}"
+
+    if [[ -z "$normalized" ]]; then
+      printf '%s' "$current"
+      return 0
+    fi
+
+    case "$normalized" in
+      true|false)
+        printf '%s' "$normalized"
+        return 0
+        ;;
+      y|yes)
+        printf '%s' "true"
+        return 0
+        ;;
+      n|no)
+        printf '%s' "false"
+        return 0
+        ;;
+    esac
+
+    tty_print "Please enter true/false or yes/no.\n"
+  done
+}
+
+require_number() {
+  local name="$1"
+  local value="$2"
+  [[ "$value" =~ ^[0-9]+$ ]] || {
+    echo "$name must be numeric: $value" >&2
+    exit 1
+  }
+}
+
+require_bool() {
+  local name="$1"
+  local value="${2,,}"
+
+  case "$value" in
+    true|false)
+      return 0
+      ;;
+    *)
+      echo "$name must be true or false: $2" >&2
+      exit 1
+      ;;
+  esac
+}
+
+collect_install_settings() {
+  local generated_password="$1"
+
+  if can_prompt; then
+    tty_print "OpenCode hostops installer\n"
+    tty_print "Press Enter to accept the value in brackets.\n\n"
+  fi
+
+  APP_DIR="$(prompt_with_default "App directory" "$APP_DIR")"
+  APP_ROOT="$(prompt_with_default "App root" "$APP_ROOT")"
+  HOST_USER="$(prompt_with_default "Restricted host user" "$HOST_USER")"
+  CONTAINER_NAME="$(prompt_with_default "Container name" "$CONTAINER_NAME")"
+  OPENCODE_PORT="$(prompt_with_default "Web UI port" "$OPENCODE_PORT")"
+  TZ_VALUE="$(prompt_with_default "Timezone" "$TZ_VALUE")"
+  APP_OWNER_UID="$(prompt_with_default "App owner UID" "$APP_OWNER_UID")"
+  APP_OWNER_GID="$(prompt_with_default "App owner GID" "$APP_OWNER_GID")"
+  OPENCODE_PASSWORD="$(prompt_password "$generated_password")"
+  INSTALL_OPENCODE_LAUNCHER="$(prompt_bool "Install opencode launcher" "$INSTALL_OPENCODE_LAUNCHER")"
+
+  require_number "OPENCODE_PORT" "$OPENCODE_PORT"
+  require_number "PUID" "$APP_OWNER_UID"
+  require_number "PGID" "$APP_OWNER_GID"
+  require_bool "INSTALL_OPENCODE_LAUNCHER" "$INSTALL_OPENCODE_LAUNCHER"
+}
 
 need_root() {
   if [[ "${EUID}" -ne 0 ]]; then
@@ -59,9 +208,13 @@ if ! command_exists ssh-keygen; then
   exit 1
 fi
 
+init_prompt_tty
+
 APP_OWNER_UID="${PUID:-${SUDO_UID:-1000}}"
 APP_OWNER_GID="${PGID:-${SUDO_GID:-1000}}"
 OPENCODE_PASSWORD="${OPENCODE_SERVER_PASSWORD:-$(generate_password)}"
+
+collect_install_settings "$OPENCODE_PASSWORD"
 
 mkdir -p "$APP_DIR"/{config,share,state,workspace,ssh}
 

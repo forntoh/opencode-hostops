@@ -72,6 +72,8 @@ This is not a perfect sandbox. It is a practical home-server operations gateway.
 curl -fsSL https://raw.githubusercontent.com/forntoh/opencode-hostops/main/scripts/install.sh | sudo bash
 ```
 
+The installer will prompt for the main settings. Press Enter to keep each default value.
+
 With custom paths:
 
 ```bash
@@ -88,6 +90,8 @@ For local testing after cloning the repository:
 ```bash
 sudo ./scripts/install.sh
 ```
+
+This local installer flow uses the same interactive prompts and defaults.
 
 The installer will create the app directory, install the host gateway scripts, configure the restricted SSH user, create the OpenCode container files, build the container, and print the generated web password at the end.
 
