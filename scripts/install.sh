@@ -291,16 +291,16 @@ fi
 if id "$HOST_USER" >/dev/null 2>&1; then
   existing_home="$(getent passwd "$HOST_USER" | cut -d: -f6)"
   if [[ -n "$existing_home" ]] && ! path_writable_or_creatable "$existing_home/.ssh"; then
-    if [[ "$HOST_USER_HOME" == "$APP_DIR/system/$HOST_USER-home" ]] && command_exists usermod; then
-      mkdir -p "$HOST_USER_HOME"
-      usermod -d "$HOST_USER_HOME" "$HOST_USER"
-      existing_home="$HOST_USER_HOME"
-      printf 'Updated %s home directory to %s because the original home was not writable.\n' "$HOST_USER" "$HOST_USER_HOME" >&2
-    elif [[ -n "${SUDO_USER:-}" ]] && [[ "$HOST_USER" != "$SUDO_USER" ]] && id "$SUDO_USER" >/dev/null 2>&1; then
+    if [[ -n "${SUDO_USER:-}" ]] && [[ "$HOST_USER" != "$SUDO_USER" ]] && id "$SUDO_USER" >/dev/null 2>&1; then
       printf 'Using existing sudo user %s because %s has an unwritable home directory.\n' "$SUDO_USER" "$HOST_USER" >&2
       HOST_USER="$SUDO_USER"
       HOST_USER_HOME="$(getent passwd "$HOST_USER" | cut -d: -f6)"
       HOST_USER_FALLBACKED=true
+    elif [[ "$HOST_USER_HOME" == "$APP_DIR/system/$HOST_USER-home" ]] && command_exists usermod; then
+      mkdir -p "$HOST_USER_HOME"
+      usermod -d "$HOST_USER_HOME" "$HOST_USER"
+      existing_home="$HOST_USER_HOME"
+      printf 'Updated %s home directory to %s because the original home was not writable.\n' "$HOST_USER" "$HOST_USER_HOME" >&2
     elif [[ "$HOST_USER" != "root" ]]; then
       printf 'Using root because %s has an unwritable home directory.\n' "$HOST_USER" >&2
       HOST_USER="root"
