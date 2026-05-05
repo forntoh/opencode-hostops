@@ -1,0 +1,684 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+# Optional host-wide configuration written by scripts/install.sh.
+if [[ -f /etc/opencode-hostops.env ]]; then
+  # shellcheck disable=SC1091
+  source /etc/opencode-hostops.env
+fi
+
+APP_ROOT="${OPENCODE_APP_ROOT:-/DATA/AppData}"
+CRON_PREFIX="/etc/cron.d/opencode-"
+CRON_LOG="/var/log/opencode-managed-cron.log"
+
+# Print errors in a predictable format so OpenCode can explain them clearly.
+die() {
+  echo "ERROR: $*" >&2
+  exit 1
+}
+
+# Best-effort redaction for logs, inspect output, Compose YAML, and config output.
+# This is not a replacement for never printing secrets, but it reduces accidental leaks.
+redact() {
+  sed -E \
+    -e 's/((PASS|PASSWORD|PASSWD|TOKEN|SECRET|API_KEY|APIKEY|ACCESS_KEY|PRIVATE_KEY|CREDENTIAL|AUTH)[A-Za-z0-9_.-]*[[:space:]]*[:=][[:space:]]*)[^[:space:]]+/\1<redacted>/Ig' \
+    -e 's/("(pass(word)?|passwd|token|secret|api[_-]?key|access[_-]?key|private[_-]?key|credential|auth)[^"]*"[[:space:]]*:[[:space:]]*")[^"]+"/\1<redacted>"/Ig'
+}
+
+valid_name() {
+  [[ "${1:-}" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,100}$ ]]
+}
+
+valid_cron_name() {
+  [[ "${1:-}" =~ ^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$ ]]
+}
+
+valid_unit() {
+  [[ "${1:-}" =~ ^[A-Za-z0-9_.@-]+\.(service|timer)$ ]]
+}
+
+compose_file_for_dir() {
+  local dir="$1"
+  local f
+
+  for f in docker-compose.yml docker-compose.yaml compose.yml compose.yaml; do
+    if [[ -f "$dir/$f" ]]; then
+      printf '%s' "$dir/$f"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+list_compose_dirs() {
+  find "$APP_ROOT" -mindepth 2 -maxdepth 4 -type f \
+    \( -name docker-compose.yml -o -name docker-compose.yaml -o -name compose.yml -o -name compose.yaml \) \
+    -printf '%h\n' 2>/dev/null | sort -u
+}
+
+app_dir() {
+  local app="${1:-}"
+  valid_name "$app" || die "Invalid app name: $app"
+
+  local direct="$APP_ROOT/$app"
+  local root_real
+  root_real="$(realpath "$APP_ROOT")"
+
+  if [[ -d "$direct" ]] && compose_file_for_dir "$direct" >/dev/null 2>&1; then
+    local direct_real
+    direct_real="$(realpath "$direct")"
+    [[ "$direct_real" == "$root_real"/* ]] || die "App path escapes APP_ROOT"
+    printf '%s' "$direct_real"
+    return 0
+  fi
+
+  local matches=()
+  local d
+  while IFS= read -r d; do
+    if [[ "$(basename "$d")" == "$app" ]]; then
+      matches+=("$(realpath "$d")")
+    fi
+  done < <(list_compose_dirs)
+
+  if [[ "${#matches[@]}" -eq 0 ]]; then
+    die "App folder not found or has no Compose file: $app"
+  fi
+
+  if [[ "${#matches[@]}" -gt 1 ]]; then
+    echo "Multiple matching app folders found:" >&2
+    printf '  %s\n' "${matches[@]}" >&2
+    die "Use a unique folder name."
+  fi
+
+  [[ "${matches[0]}" == "$root_real"/* ]] || die "App path escapes APP_ROOT"
+  printf '%s' "${matches[0]}"
+}
+
+safe_app_path() {
+  local app="$1"
+  local rel="${2:-.}"
+  local dir target
+
+  dir="$(app_dir "$app")"
+
+  [[ "$rel" != /* ]] || die "Path must be relative to the app folder"
+  [[ "$rel" != *$'\0'* ]] || die "Invalid path"
+
+  target="$(realpath -m "$dir/$rel")"
+
+  if [[ "$target" != "$dir" && "$target" != "$dir/"* ]]; then
+    die "Path escapes app folder"
+  fi
+
+  printf '%s' "$target"
+}
+
+forbidden_sensitive_path() {
+  local path_lc
+  path_lc="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+
+  case "$path_lc" in
+    *.env|*.env.*|*/.env|*/.env.*|*secret*|*password*|*token*|*private*key*|*.pem|*.key|*.crt|*.p12|*.sqlite|*.sqlite3|*.db)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+compose_cmd() {
+  local dir="$1"
+  shift
+  cd "$dir"
+
+  if docker compose version >/dev/null 2>&1; then
+    docker compose "$@"
+  elif command -v docker-compose >/dev/null 2>&1; then
+    docker-compose "$@"
+  else
+    die "Neither docker compose nor docker-compose is available"
+  fi
+}
+
+safe_container() {
+  local c="${1:-}"
+  valid_name "$c" || die "Invalid container name: $c"
+  docker container inspect "$c" >/dev/null 2>&1 || die "Container not found: $c"
+  printf '%s' "$c"
+}
+
+docker_cmd() {
+  local action="${1:-}"
+  shift || true
+
+  case "$action" in
+    list)
+      docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}'
+      ;;
+
+    all)
+      docker ps -a --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}'
+      ;;
+
+    unhealthy)
+      docker ps --filter health=unhealthy --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}'
+      ;;
+
+    status)
+      local c
+      c="$(safe_container "${1:-}")"
+      docker inspect --format 'Name={{.Name}}
+Image={{.Config.Image}}
+Status={{.State.Status}}
+Health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}
+Started={{.State.StartedAt}}
+RestartCount={{.RestartCount}}' "$c"
+      ;;
+
+    logs)
+      local c lines
+      c="$(safe_container "${1:-}")"
+      lines="${2:-200}"
+      [[ "$lines" =~ ^[0-9]+$ ]] || die "Lines must be a number"
+      [[ "$lines" -le 5000 ]] || lines=5000
+      docker logs --tail "$lines" "$c" 2>&1 | redact
+      ;;
+
+    inspect)
+      local c
+      c="$(safe_container "${1:-}")"
+      docker inspect "$c" | redact
+      ;;
+
+    start|stop|restart)
+      local c
+      c="$(safe_container "${1:-}")"
+      docker "$action" "$c"
+      docker ps -a --filter "name=$c" --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
+      ;;
+
+    stats)
+      docker stats --no-stream
+      ;;
+
+    *)
+      cat <<HELP
+Usage:
+  docker list
+  docker all
+  docker unhealthy
+  docker status <container>
+  docker logs <container> [lines]
+  docker inspect <container>
+  docker start <container>
+  docker stop <container>
+  docker restart <container>
+  docker stats
+HELP
+      exit 1
+      ;;
+  esac
+}
+
+app_cmd() {
+  local action="${1:-}"
+  shift || true
+
+  case "$action" in
+    list)
+      while IFS= read -r d; do
+        basename "$d"
+      done < <(list_compose_dirs)
+      ;;
+
+    inventory)
+      printf 'APP\tSIZE\tCOMPOSE_FILE\n'
+      while IFS= read -r d; do
+        local app size compose
+        app="$(basename "$d")"
+        size="$(du -sh "$d" 2>/dev/null | awk '{print $1}')"
+        compose="$(compose_file_for_dir "$d")"
+        printf '%s\t%s\t%s\n' "$app" "${size:-?}" "$compose"
+      done < <(list_compose_dirs)
+      ;;
+
+    sizes)
+      du -xh --max-depth=1 "$APP_ROOT" 2>/dev/null | sort -h
+      ;;
+
+    size)
+      local dir
+      dir="$(app_dir "${1:-}")"
+      du -xh --max-depth=2 "$dir" 2>/dev/null | sort -h
+      ;;
+
+    ps)
+      local dir
+      dir="$(app_dir "${1:-}")"
+      compose_cmd "$dir" ps
+      ;;
+
+    logs)
+      local dir lines
+      dir="$(app_dir "${1:-}")"
+      lines="${2:-200}"
+      [[ "$lines" =~ ^[0-9]+$ ]] || die "Lines must be a number"
+      [[ "$lines" -le 5000 ]] || lines=5000
+      compose_cmd "$dir" logs --tail "$lines" 2>&1 | redact
+      ;;
+
+    config)
+      local dir
+      dir="$(app_dir "${1:-}")"
+      compose_cmd "$dir" config | redact
+      ;;
+
+    compose)
+      local dir file
+      dir="$(app_dir "${1:-}")"
+      file="$(compose_file_for_dir "$dir")"
+      echo "### $file"
+      cat "$file" | redact
+      ;;
+
+    compose-all)
+      while IFS= read -r d; do
+        local file
+        file="$(compose_file_for_dir "$d")"
+        echo
+        echo "### APP: $(basename "$d")"
+        echo "### FILE: $file"
+        cat "$file" | redact
+      done < <(list_compose_dirs)
+      ;;
+
+    ls)
+      local target
+      target="$(safe_app_path "${1:-}" "${2:-.}")"
+      ls -lah "$target"
+      ;;
+
+    tree)
+      local app depth dir
+      app="${1:-}"
+      depth="${2:-2}"
+      [[ "$depth" =~ ^[0-9]+$ ]] || die "Depth must be a number"
+      [[ "$depth" -le 5 ]] || depth=5
+      dir="$(app_dir "$app")"
+
+      find "$dir" -maxdepth "$depth" \
+        \( -path '*/node_modules' -o -path '*/.git' -o -path '*/cache' -o -path '*/Cache' \) -prune -o \
+        -printf '%M %10s %TY-%Tm-%Td %TH:%TM %p\n' 2>/dev/null | head -500
+      ;;
+
+    read)
+      local app rel lines target
+      app="${1:-}"
+      rel="${2:-}"
+      lines="${3:-300}"
+
+      [[ -n "$rel" ]] || die "Usage: app read <app> <relative-file> [lines]"
+      [[ "$lines" =~ ^[0-9]+$ ]] || die "Lines must be a number"
+      [[ "$lines" -le 2000 ]] || lines=2000
+
+      target="$(safe_app_path "$app" "$rel")"
+      [[ -f "$target" ]] || die "Not a file: $rel"
+
+      if forbidden_sensitive_path "$target"; then
+        die "Refusing to read sensitive-looking file: $rel"
+      fi
+
+      if ! grep -Iq . "$target"; then
+        die "Refusing to print binary file: $rel"
+      fi
+
+      echo "### $target"
+      head -n "$lines" "$target" | redact
+      ;;
+
+    grep)
+      local app pattern target
+      app="${1:-}"
+      pattern="${2:-}"
+      [[ -n "$pattern" ]] || die "Usage: app grep <app> <pattern> [relative-path]"
+      target="$(safe_app_path "$app" "${3:-.}")"
+
+      grep -RInI \
+        --exclude='.env' \
+        --exclude='.env.*' \
+        --exclude='*.db' \
+        --exclude='*.sqlite' \
+        --exclude='*.sqlite3' \
+        --exclude='*.pem' \
+        --exclude='*.key' \
+        --exclude='*.crt' \
+        --exclude-dir='node_modules' \
+        --exclude-dir='.git' \
+        --exclude-dir='cache' \
+        --exclude-dir='Cache' \
+        -- "$pattern" "$target" 2>/dev/null | head -300 | redact
+      ;;
+
+    start|stop|restart)
+      local dir
+      dir="$(app_dir "${1:-}")"
+      compose_cmd "$dir" "$action"
+      compose_cmd "$dir" ps
+      ;;
+
+    update)
+      local dir
+      dir="$(app_dir "${1:-}")"
+      compose_cmd "$dir" pull
+      compose_cmd "$dir" up -d --remove-orphans
+      compose_cmd "$dir" ps
+      ;;
+
+    *)
+      cat <<HELP
+Usage:
+  app list
+  app inventory
+  app sizes
+  app size <app>
+  app ps <app>
+  app logs <app> [lines]
+  app config <app>
+  app compose <app>
+  app compose-all
+  app ls <app> [relative-path]
+  app tree <app> [depth]
+  app read <app> <relative-file> [lines]
+  app grep <app> <pattern> [relative-path]
+  app start <app>
+  app stop <app>
+  app restart <app>
+  app update <app>
+HELP
+      exit 1
+      ;;
+  esac
+}
+
+valid_schedule() {
+  local schedule="${1:-}"
+  [[ "$(awk '{print NF}' <<< "$schedule")" -eq 5 ]] || die "Cron schedule must have exactly 5 fields"
+  [[ "$schedule" =~ ^[A-Za-z0-9*/,_\ -]+$ ]] || die "Cron schedule contains unsupported characters"
+}
+
+cron_file() {
+  local name="${1:-}"
+  valid_cron_name "$name" || die "Invalid cron job name: $name"
+  printf '%s%s' "$CRON_PREFIX" "$name"
+}
+
+cron_safe_command() {
+  [[ $# -ge 2 ]] || die "Cron command is too short"
+
+  case "${1:-}:${2:-}" in
+    docker:start|docker:stop|docker:restart)
+      [[ $# -eq 3 ]] || die "Cron docker command must be: docker start|stop|restart <container>"
+      safe_container "$3" >/dev/null
+      ;;
+
+    app:start|app:stop|app:restart|app:update)
+      [[ $# -eq 3 ]] || die "Cron app command must be: app start|stop|restart|update <app>"
+      app_dir "$3" >/dev/null
+      ;;
+
+    health:summary)
+      [[ $# -eq 2 ]] || die "Cron health summary takes no extra arguments"
+      ;;
+
+    *)
+      die "This command is not allowed in cron: $*"
+      ;;
+  esac
+}
+
+cron_cmd() {
+  local action="${1:-}"
+  shift || true
+
+  case "$action" in
+    list)
+      shopt -s nullglob
+      local found=0
+      for f in "${CRON_PREFIX}"*; do
+        found=1
+        echo "### $(basename "$f" | sed 's/^opencode-//')"
+        grep -v '^#' "$f" | sed '/^\s*$/d' | redact
+        echo
+      done
+      [[ "$found" -eq 1 ]] || echo "No OpenCode-managed cron jobs found."
+      ;;
+
+    system)
+      {
+        echo "### /etc/crontab"
+        cat /etc/crontab 2>/dev/null || true
+
+        echo
+        echo "### /etc/cron.d"
+        for f in /etc/cron.d/*; do
+          [[ -f "$f" ]] || continue
+          echo
+          echo "--- $f"
+          cat "$f"
+        done
+
+        echo
+        echo "### Root crontab"
+        crontab -l -u root 2>/dev/null || echo "No root crontab or not available."
+      } | redact
+      ;;
+
+    show)
+      local f
+      f="$(cron_file "${1:-}")"
+      [[ -f "$f" ]] || die "Cron job not found: ${1:-}"
+      cat "$f" | redact
+      ;;
+
+    create|update)
+      local name schedule f
+      name="${1:-}"
+      schedule="${2:-}"
+      shift 2 || die "Usage: cron $action <name> '<schedule>' <allowed-command...>"
+
+      valid_cron_name "$name" || die "Invalid cron job name"
+      valid_schedule "$schedule"
+      [[ $# -gt 0 ]] || die "Missing cron command"
+      cron_safe_command "$@"
+
+      f="$(cron_file "$name")"
+      touch "$CRON_LOG"
+      chmod 644 "$CRON_LOG"
+
+      {
+        echo "# Managed by opencode-hostops. Do not edit manually."
+        echo "SHELL=/bin/bash"
+        echo "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+        printf '%s root /usr/local/sbin/opencode-host-helper --cron-run ' "$schedule"
+        printf '%q ' "$@"
+        printf '>> %q 2>&1\n' "$CRON_LOG"
+      } > "$f"
+
+      chmod 644 "$f"
+      echo "Wrote $f"
+      ;;
+
+    delete)
+      local f
+      f="$(cron_file "${1:-}")"
+      [[ -f "$f" ]] || die "Cron job not found: ${1:-}"
+      rm -f "$f"
+      echo "Deleted $f"
+      ;;
+
+    *)
+      cat <<HELP
+Usage:
+  cron list
+  cron system
+  cron show <name>
+  cron create <name> "<5-field-schedule>" <allowed-command...>
+  cron update <name> "<5-field-schedule>" <allowed-command...>
+  cron delete <name>
+
+Allowed cron commands:
+  docker start <container>
+  docker stop <container>
+  docker restart <container>
+  app start <app>
+  app stop <app>
+  app restart <app>
+  app update <app>
+  health summary
+HELP
+      exit 1
+      ;;
+  esac
+}
+
+health_cmd() {
+  local action="${1:-summary}"
+
+  case "$action" in
+    summary)
+      echo "### Host"
+      hostname
+      uptime || true
+
+      echo
+      echo "### Disk"
+      df -h / /DATA 2>/dev/null || df -h
+
+      echo
+      echo "### Memory"
+      free -h || true
+
+      echo
+      echo "### Failed systemd services"
+      systemctl --failed --no-pager || true
+
+      echo
+      echo "### Docker containers"
+      docker ps -a --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}'
+      ;;
+
+    disk)
+      df -h
+      echo
+      echo "### AppData folder sizes"
+      du -xh --max-depth=1 "$APP_ROOT" 2>/dev/null | sort -h || true
+      ;;
+
+    memory)
+      free -h || true
+      echo
+      ps aux --sort=-%mem | head -15 || true
+      ;;
+
+    services)
+      systemctl --failed --no-pager || true
+      ;;
+
+    docker)
+      docker ps -a --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}'
+      echo
+      docker stats --no-stream || true
+      ;;
+
+    network)
+      ip -br addr || true
+      echo
+      ss -tulpn | head -100 || true
+      ;;
+
+    *)
+      cat <<HELP
+Usage:
+  health summary
+  health disk
+  health memory
+  health services
+  health docker
+  health network
+HELP
+      exit 1
+      ;;
+  esac
+}
+
+system_cmd() {
+  local action="${1:-}"
+  shift || true
+
+  case "$action" in
+    failed-services)
+      systemctl --failed --no-pager || true
+      ;;
+
+    timers)
+      systemctl list-timers --all --no-pager || true
+      ;;
+
+    journal)
+      local unit lines
+      unit="${1:-}"
+      lines="${2:-200}"
+
+      valid_unit "$unit" || die "Invalid unit name. Example: docker.service"
+      [[ "$lines" =~ ^[0-9]+$ ]] || die "Lines must be a number"
+      [[ "$lines" -le 5000 ]] || lines=5000
+
+      journalctl -u "$unit" -n "$lines" --no-pager | redact
+      ;;
+
+    *)
+      cat <<HELP
+Usage:
+  system failed-services
+  system timers
+  system journal <unit.service> [lines]
+HELP
+      exit 1
+      ;;
+  esac
+}
+
+dispatch() {
+  local group="${1:-}"
+  shift || true
+
+  case "$group" in
+    docker) docker_cmd "$@" ;;
+    app) app_cmd "$@" ;;
+    cron) cron_cmd "$@" ;;
+    health) health_cmd "$@" ;;
+    system) system_cmd "$@" ;;
+    *)
+      cat <<HELP
+Allowed command groups:
+  docker ...
+  app ...
+  cron ...
+  health ...
+  system ...
+HELP
+      exit 1
+      ;;
+  esac
+}
+
+if [[ "${1:-}" == "--cron-run" ]]; then
+  shift
+  cron_safe_command "$@"
+  dispatch "$@"
+  exit 0
+fi
+
+dispatch "$@"

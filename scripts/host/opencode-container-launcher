@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+# Host-side launcher for OpenCode running inside the container.
+# This does not install OpenCode on the host.
+APP_DIR="${OPENCODE_CONTAINER_APP_DIR:-/DATA/AppData/opencode}"
+CONTAINER="${OPENCODE_CONTAINER_NAME:-opencode}"
+
+if ! docker ps --format '{{.Names}}' | grep -qx "$CONTAINER"; then
+  if docker ps -a --format '{{.Names}}' | grep -qx "$CONTAINER"; then
+    docker start "$CONTAINER" >/dev/null
+  else
+    cd "$APP_DIR"
+    if docker compose version >/dev/null 2>&1; then
+      docker compose up -d --build
+    else
+      docker-compose up -d --build
+    fi
+  fi
+fi
+
+if [[ "${1:-}" == "web-url" ]]; then
+  ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
+  echo "OpenCode web UI: http://${ip:-YOUR-ZIMA-IP}:4096"
+  exit 0
+fi
+
+if [[ -t 0 && -t 1 ]]; then
+  exec docker exec -it -w /workspace "$CONTAINER" opencode "$@"
+else
+  exec docker exec -i -w /workspace "$CONTAINER" opencode "$@"
+fi

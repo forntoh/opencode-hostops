@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+# Container-side host operations gateway.
+# It talks to the host via a forced SSH command and passes argv safely as base64.
+
+if [[ "$#" -eq 0 ]]; then
+  echo "Usage: hostctl <group> <command> [args...]"
+  echo
+  echo "Examples:"
+  echo "  hostctl health summary"
+  echo "  hostctl app inventory"
+  echo "  hostctl app compose immich"
+  echo "  hostctl docker list"
+  exit 1
+fi
+
+tmp=""
+
+for arg in "$@"; do
+  tmp+="$(printf '%s' "$arg" | base64 -w0)"
+  tmp+=$'\n'
+done
+
+payload="$(printf '%s' "$tmp" | base64 -w0)"
+
+exec ssh hostops "args64:$payload"

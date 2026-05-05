@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+# Host-side convenience command. This lets you run the same gateway manually.
+exec sudo /usr/local/sbin/opencode-host-helper "$@"

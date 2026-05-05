@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+# Forced-command SSH entrypoint.
+# The container sends base64-encoded argv so we don't need to parse shell strings.
+cmd="${SSH_ORIGINAL_COMMAND:-}"
+
+if [[ -z "$cmd" ]]; then
+  echo "No command provided. Use hostctl."
+  exit 2
+fi
+
+if [[ "$cmd" != args64:* ]]; then
+  echo "Rejected. Use hostctl."
+  exit 2
+fi
+
+payload="${cmd#args64:}"
+
+decoded="$(printf '%s' "$payload" | base64 -d 2>/dev/null)" || {
+  echo "Invalid payload"
+  exit 2
+}
+
+args=()
+
+while IFS= read -r line; do
+  [[ -n "$line" ]] || continue
+  arg="$(printf '%s' "$line" | base64 -d 2>/dev/null)" || {
+    echo "Invalid argument encoding"
+    exit 2
+  }
+  args+=("$arg")
+done <<< "$decoded"
+
+[[ "${#args[@]}" -gt 0 ]] || {
+  echo "No command arguments"
+  exit 2
+}
+
+exec sudo /usr/local/sbin/opencode-host-helper "${args[@]}"

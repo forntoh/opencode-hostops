@@ -1,0 +1,82 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "share": "disabled",
+  "snapshot": false,
+  "instructions": ["/workspace/SERVER-RUNBOOK.md"],
+
+  "permission": {
+    "*": "ask",
+
+    "bash": {
+      "*": "ask",
+
+      "hostctl health summary": "allow",
+      "hostctl health disk": "allow",
+      "hostctl health memory": "allow",
+      "hostctl health services": "allow",
+      "hostctl health docker": "allow",
+      "hostctl health network": "ask",
+
+      "hostctl docker list": "allow",
+      "hostctl docker all": "allow",
+      "hostctl docker unhealthy": "allow",
+      "hostctl docker status *": "allow",
+      "hostctl docker logs *": "ask",
+      "hostctl docker inspect *": "ask",
+      "hostctl docker stats": "allow",
+      "hostctl docker start *": "ask",
+      "hostctl docker stop *": "ask",
+      "hostctl docker restart *": "ask",
+
+      "hostctl app list": "allow",
+      "hostctl app inventory": "allow",
+      "hostctl app sizes": "allow",
+      "hostctl app size *": "allow",
+      "hostctl app ps *": "allow",
+      "hostctl app logs *": "ask",
+      "hostctl app config *": "ask",
+      "hostctl app compose *": "ask",
+      "hostctl app compose-all": "ask",
+      "hostctl app ls *": "ask",
+      "hostctl app tree *": "ask",
+      "hostctl app read *": "ask",
+      "hostctl app grep *": "ask",
+      "hostctl app start *": "ask",
+      "hostctl app stop *": "ask",
+      "hostctl app restart *": "ask",
+      "hostctl app update *": "ask",
+
+      "hostctl cron list": "allow",
+      "hostctl cron system": "ask",
+      "hostctl cron show *": "allow",
+      "hostctl cron create *": "ask",
+      "hostctl cron update *": "ask",
+      "hostctl cron delete *": "ask",
+
+      "hostctl system failed-services": "allow",
+      "hostctl system timers": "allow",
+      "hostctl system journal *": "ask",
+
+      "docker *": "deny",
+      "docker-compose *": "deny",
+      "sudo *": "deny",
+      "ssh *": "deny",
+      "rm *": "deny",
+      "chmod *": "deny",
+      "chown *": "deny",
+      "mount *": "deny"
+    },
+
+    "edit": {
+      "*": "ask",
+      "/host/**": "deny"
+    },
+
+    "read": {
+      "*": "allow",
+      "*.env": "deny",
+      "*.env.*": "deny",
+      "**/secrets/**": "deny"
+    }
+  }
+}
