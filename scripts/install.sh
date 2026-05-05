@@ -253,6 +253,7 @@ init_prompt_tty
 APP_OWNER_UID="${PUID:-${SUDO_UID:-1000}}"
 APP_OWNER_GID="${PGID:-${SUDO_GID:-1000}}"
 OPENCODE_PASSWORD="${OPENCODE_SERVER_PASSWORD:-$(generate_password)}"
+HOST_USER_HOME=""
 
 collect_install_settings "$OPENCODE_PASSWORD"
 
@@ -262,6 +263,7 @@ CONFIG_PATH="$(pick_install_path "config file" "$CONFIG_PATH" "$APP_DIR/config/o
 HOST_HELPER_PATH="$(pick_install_path "host helper" "$HOST_HELPER_PATH" "$APP_DIR/bin/opencode-host-helper")"
 SSH_ENTRYPOINT_PATH="$(pick_install_path "SSH entrypoint" "$SSH_ENTRYPOINT_PATH" "$APP_DIR/bin/opencode-ssh-entrypoint")"
 HOSTCTL_PATH="$(pick_install_path "hostctl wrapper" "$HOSTCTL_PATH" "$APP_DIR/bin/hostctl")"
+HOST_USER_HOME="$(pick_install_path "host user home" "/home/$HOST_USER" "$APP_DIR/system/$HOST_USER-home")"
 if [[ "$INSTALL_OPENCODE_LAUNCHER" == "true" ]]; then
   OPENCODE_LAUNCHER_PATH="$(pick_install_path "opencode launcher" "$OPENCODE_LAUNCHER_PATH" "$APP_DIR/bin/opencode")"
 fi
@@ -1424,17 +1426,20 @@ chmod 600 "$APP_DIR/.env"
 
 # Create restricted host user.
 if ! id "$HOST_USER" >/dev/null 2>&1; then
-  useradd -m -s /bin/bash "$HOST_USER"
+  useradd -M -d "$HOST_USER_HOME" -s /bin/bash "$HOST_USER"
+else
+  HOST_USER_HOME="$(getent passwd "$HOST_USER" | cut -d: -f6)"
 fi
 
-mkdir -p "/home/$HOST_USER/.ssh"
-chmod 700 "/home/$HOST_USER/.ssh"
+mkdir -p "$HOST_USER_HOME/.ssh"
+chown "$HOST_USER:$HOST_USER" "$HOST_USER_HOME"
+chmod 700 "$HOST_USER_HOME/.ssh"
 PUB="$(cat "$APP_DIR/ssh/id_ed25519.pub")"
-cat > "/home/$HOST_USER/.ssh/authorized_keys" <<EOF
+cat > "$HOST_USER_HOME/.ssh/authorized_keys" <<EOF
 command="$SSH_ENTRYPOINT_PATH",no-agent-forwarding,no-X11-forwarding,no-port-forwarding,no-pty $PUB
 EOF
-chown -R "$HOST_USER:$HOST_USER" "/home/$HOST_USER/.ssh"
-chmod 600 "/home/$HOST_USER/.ssh/authorized_keys"
+chown -R "$HOST_USER:$HOST_USER" "$HOST_USER_HOME/.ssh"
+chmod 600 "$HOST_USER_HOME/.ssh/authorized_keys"
 
 cat > /etc/sudoers.d/opencode-hostops <<EOF
 ${HOST_USER} ALL=(root) NOPASSWD: ${HOST_HELPER_PATH} *
@@ -1455,6 +1460,7 @@ printf '%s\n' "Config file: $CONFIG_PATH"
 printf '%s\n' "Host helper: $HOST_HELPER_PATH"
 printf '%s\n' "SSH entrypoint: $SSH_ENTRYPOINT_PATH"
 printf '%s\n' "Hostctl wrapper: $HOSTCTL_PATH"
+printf '%s\n' "Restricted host user home: $HOST_USER_HOME"
 if [[ "$INSTALL_OPENCODE_LAUNCHER" == "true" ]]; then
   printf '%s\n' "OpenCode launcher: $OPENCODE_LAUNCHER_PATH"
 fi
