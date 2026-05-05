@@ -1188,6 +1188,7 @@ name: opencode-hostops
 
 services:
   opencode:
+    image: opencode-hostops:latest
     build:
       context: .
       dockerfile: Dockerfile
@@ -1202,6 +1203,9 @@ services:
 
     environment:
       TZ: ${TZ:-Europe/Berlin}
+
+    labels:
+      icon: https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/opencode-dark.svg
 
     command:
       - web
