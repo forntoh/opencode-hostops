@@ -26,6 +26,8 @@ hostctl docker stats
 hostctl docker start <container>
 hostctl docker stop <container>
 hostctl docker restart <container>
+hostctl docker builder-prune
+hostctl docker image-prune
 ```
 
 ## AppData / Compose apps

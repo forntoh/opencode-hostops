@@ -635,6 +635,14 @@ RestartCount={{.RestartCount}}' "$c"
       docker stats --no-stream
       ;;
 
+    builder-prune)
+      docker builder prune -f
+      ;;
+
+    image-prune)
+      docker image prune -f
+      ;;
+
     *)
       cat <<HELP
 Usage:
@@ -648,6 +656,8 @@ Usage:
   docker stop <container>
   docker restart <container>
   docker stats
+  docker builder-prune
+  docker image-prune
 HELP
       exit 1
       ;;

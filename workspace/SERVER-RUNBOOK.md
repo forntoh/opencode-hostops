@@ -52,6 +52,8 @@ Prefer read-only diagnostic commands first. Do not suggest destructive commands 
 - `hostctl docker start <container>`
 - `hostctl docker stop <container>`
 - `hostctl docker restart <container>`
+- `hostctl docker builder-prune`
+- `hostctl docker image-prune`
 
 ## AppData / Compose app commands
 
