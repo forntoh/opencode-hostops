@@ -40,11 +40,18 @@
       "hostctl app ls *": "ask",
       "hostctl app tree *": "ask",
       "hostctl app read *": "ask",
+      "hostctl app find *": "ask",
       "hostctl app grep *": "ask",
       "hostctl app start *": "ask",
       "hostctl app stop *": "ask",
       "hostctl app restart *": "ask",
       "hostctl app update *": "ask",
+
+      "hostctl documents *": "ask",
+      "hostctl downloads *": "ask",
+      "hostctl media *": "ask",
+      "hostctl backup *": "ask",
+      "hostctl scripts *": "ask",
 
       "hostctl cron list": "allow",
       "hostctl cron system": "ask",

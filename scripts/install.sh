@@ -469,6 +469,26 @@ safe_app_path() {
   printf '%s' "$target"
 }
 
+safe_root_path() {
+  local root="$1"
+  local rel="${2:-.}"
+  local root_real target
+
+  [[ -d "$root" ]] || die "Root path not found: $root"
+  root_real="$(realpath "$root")"
+
+  [[ "$rel" != /* ]] || die "Path must be relative to the root folder"
+  [[ -n "$rel" ]] || die "Invalid path"
+
+  target="$(realpath -m "$root_real/$rel")"
+
+  if [[ "$target" != "$root_real" && "$target" != "$root_real/"* ]]; then
+    die "Path escapes root folder"
+  fi
+
+  printf '%s' "$target"
+}
+
 forbidden_sensitive_path() {
   local path_lc
   path_lc="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
@@ -770,6 +790,140 @@ HELP
   esac
 }
 
+root_cmd() {
+  local root="$1"
+  local label="$2"
+  local action="${3:-}"
+  shift 3 || true
+
+  case "$action" in
+    ls)
+      local target
+      target="$(safe_root_path "$root" "${1:-.}")"
+      ls -lah "$target"
+      ;;
+
+    tree)
+      local rel depth target
+      rel="${1:-.}"
+      depth="${2:-2}"
+      [[ "$depth" =~ ^[0-9]+$ ]] || die "Depth must be a number"
+      [[ "$depth" -le 5 ]] || depth=5
+      target="$(safe_root_path "$root" "$rel")"
+
+      find "$target" -maxdepth "$depth" \
+        \( -path '*/node_modules' -o -path '*/.git' -o -path '*/cache' -o -path '*/Cache' \) -prune -o \
+        -print 2>/dev/null | head -500
+      ;;
+
+    read)
+      local rel lines target
+      rel="${1:-}"
+      lines="${2:-300}"
+      [[ -n "$rel" ]] || die "Usage: $label read <relative-file> [lines]"
+      [[ "$lines" =~ ^[0-9]+$ ]] || die "Lines must be a number"
+      [[ "$lines" -le 2000 ]] || lines=2000
+
+      target="$(safe_root_path "$root" "$rel")"
+      [[ -f "$target" ]] || die "Not a file: $rel"
+
+      if forbidden_sensitive_path "$target"; then
+        die "Refusing to read sensitive-looking file: $rel"
+      fi
+
+      if ! grep -Iq . "$target"; then
+        die "Refusing to print binary file: $rel"
+      fi
+
+      echo "### $target"
+      head -n "$lines" "$target" | redact
+      ;;
+
+    find)
+      local pattern target
+      pattern="${1:-}"
+      [[ -n "$pattern" ]] || die "Usage: $label find <filename-pattern> [relative-path]"
+      target="$(safe_root_path "$root" "${2:-.}")"
+
+      find "$target" \
+        \( -path '*/node_modules' -o -path '*/.git' -o -path '*/cache' -o -path '*/Cache' \) -prune -o \
+        -type f -name "$pattern" -print 2>/dev/null | head -300
+      ;;
+
+    grep)
+      local pattern target
+      pattern="${1:-}"
+      [[ -n "$pattern" ]] || die "Usage: $label grep <pattern> [relative-path]"
+      target="$(safe_root_path "$root" "${2:-.}")"
+
+      grep -RInI \
+        --exclude='.env' \
+        --exclude='.env.*' \
+        --exclude='*.db' \
+        --exclude='*.sqlite' \
+        --exclude='*.sqlite3' \
+        --exclude='*.pem' \
+        --exclude='*.key' \
+        --exclude='*.crt' \
+        --exclude-dir='node_modules' \
+        --exclude-dir='.git' \
+        --exclude-dir='cache' \
+        --exclude-dir='Cache' \
+        -- "$pattern" "$target" 2>/dev/null | head -300 | redact
+      ;;
+
+    stat)
+      local target
+      target="$(safe_root_path "$root" "${1:-.}")"
+      stat "$target"
+      ;;
+
+    du)
+      local rel depth target
+      rel="${1:-.}"
+      depth="${2:-2}"
+      [[ "$depth" =~ ^[0-9]+$ ]] || die "Depth must be a number"
+      [[ "$depth" -le 5 ]] || depth=5
+      target="$(safe_root_path "$root" "$rel")"
+      du -xh --max-depth="$depth" "$target" 2>/dev/null | sort -h
+      ;;
+
+    recent)
+      local rel count target
+      rel="${1:-.}"
+      count="${2:-20}"
+      [[ "$count" =~ ^[0-9]+$ ]] || die "Count must be a number"
+      [[ "$count" -le 200 ]] || count=200
+      target="$(safe_root_path "$root" "$rel")"
+
+      find "$target" \
+        \( -path '*/node_modules' -o -path '*/.git' -o -path '*/cache' -o -path '*/Cache' \) -prune -o \
+        -type f -exec ls -1td {} + 2>/dev/null | head -n "$count"
+      ;;
+
+    *)
+      cat <<HELP
+Usage:
+  $label ls [relative-path]
+  $label tree [relative-path] [depth]
+  $label read <relative-file> [lines]
+  $label find <filename-pattern> [relative-path]
+  $label grep <pattern> [relative-path]
+  $label stat [relative-path]
+  $label du [relative-path] [depth]
+  $label recent [relative-path] [count]
+HELP
+      exit 1
+      ;;
+  esac
+}
+
+documents_cmd() { root_cmd "/DATA/Documents" "documents" "$@"; }
+downloads_cmd() { root_cmd "/DATA/Downloads" "downloads" "$@"; }
+media_cmd() { root_cmd "/DATA/Media" "media" "$@"; }
+backup_cmd() { root_cmd "/DATA/Backup" "backup" "$@"; }
+scripts_cmd() { root_cmd "/DATA/Scripts" "scripts" "$@"; }
+
 valid_schedule() {
   local schedule="${1:-}"
   [[ "$(awk '{print NF}' <<< "$schedule")" -eq 5 ]] || die "Cron schedule must have exactly 5 fields"
@@ -1025,6 +1179,11 @@ dispatch() {
   case "$group" in
     docker) docker_cmd "$@" ;;
     app) app_cmd "$@" ;;
+    documents) documents_cmd "$@" ;;
+    downloads) downloads_cmd "$@" ;;
+    media) media_cmd "$@" ;;
+    backup) backup_cmd "$@" ;;
+    scripts) scripts_cmd "$@" ;;
     cron) cron_cmd "$@" ;;
     health) health_cmd "$@" ;;
     system) system_cmd "$@" ;;
@@ -1033,6 +1192,11 @@ dispatch() {
 Allowed command groups:
   docker ...
   app ...
+  documents ...
+  downloads ...
+  media ...
+  backup ...
+  scripts ...
   cron ...
   health ...
   system ...
@@ -1333,6 +1497,12 @@ cat > "$APP_DIR/config/opencode.json" <<'CONFIG_EOF'
       "hostctl app restart *": "ask",
       "hostctl app update *": "ask",
 
+      "hostctl documents *": "ask",
+      "hostctl downloads *": "ask",
+      "hostctl media *": "ask",
+      "hostctl backup *": "ask",
+      "hostctl scripts *": "ask",
+
       "hostctl cron list": "allow",
       "hostctl cron system": "ask",
       "hostctl cron show *": "allow",
@@ -1460,6 +1630,63 @@ Examples:
 - `hostctl app tree homeassistant 3`
 - `hostctl app read nginxproxymanager docker-compose.yml`
 - `hostctl app find duplicati "*.sqlite" config`
+
+## /DATA content commands
+
+These are read-only inspection commands for the fixed `/DATA` roots outside AppData.
+
+- `hostctl documents ls [relative-path]`
+- `hostctl documents tree [relative-path] [depth]`
+- `hostctl documents read <relative-file> [lines]`
+- `hostctl documents find <filename-pattern> [relative-path]`
+- `hostctl documents grep <pattern> [relative-path]`
+- `hostctl documents stat [relative-path]`
+- `hostctl documents du [relative-path] [depth]`
+- `hostctl documents recent [relative-path] [count]`
+
+- `hostctl downloads ls [relative-path]`
+- `hostctl downloads tree [relative-path] [depth]`
+- `hostctl downloads read <relative-file> [lines]`
+- `hostctl downloads find <filename-pattern> [relative-path]`
+- `hostctl downloads grep <pattern> [relative-path]`
+- `hostctl downloads stat [relative-path]`
+- `hostctl downloads du [relative-path] [depth]`
+- `hostctl downloads recent [relative-path] [count]`
+
+- `hostctl media ls [relative-path]`
+- `hostctl media tree [relative-path] [depth]`
+- `hostctl media read <relative-file> [lines]`
+- `hostctl media find <filename-pattern> [relative-path]`
+- `hostctl media grep <pattern> [relative-path]`
+- `hostctl media stat [relative-path]`
+- `hostctl media du [relative-path] [depth]`
+- `hostctl media recent [relative-path] [count]`
+
+- `hostctl backup ls [relative-path]`
+- `hostctl backup tree [relative-path] [depth]`
+- `hostctl backup read <relative-file> [lines]`
+- `hostctl backup find <filename-pattern> [relative-path]`
+- `hostctl backup grep <pattern> [relative-path]`
+- `hostctl backup stat [relative-path]`
+- `hostctl backup du [relative-path] [depth]`
+- `hostctl backup recent [relative-path] [count]`
+
+- `hostctl scripts ls [relative-path]`
+- `hostctl scripts tree [relative-path] [depth]`
+- `hostctl scripts read <relative-file> [lines]`
+- `hostctl scripts find <filename-pattern> [relative-path]`
+- `hostctl scripts grep <pattern> [relative-path]`
+- `hostctl scripts stat [relative-path]`
+- `hostctl scripts du [relative-path] [depth]`
+- `hostctl scripts recent [relative-path] [count]`
+
+Examples:
+
+- `hostctl documents ls`
+- `hostctl downloads find "*.nzb"`
+- `hostctl media tree Movies 2`
+- `hostctl backup stat nightly`
+- `hostctl scripts read maintenance/cleanup.sh`
 
 ## Cron commands
 

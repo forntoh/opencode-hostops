@@ -324,6 +324,7 @@ hostctl app compose-all
 hostctl app ls <app> [relative-path]
 hostctl app tree <app> [depth]
 hostctl app read <app> <relative-file> [lines]
+hostctl app find <app> <filename-pattern> [relative-path]
 hostctl app grep <app> <pattern> [relative-path]
 hostctl app start <app>
 hostctl app stop <app>
@@ -339,7 +340,69 @@ hostctl app compose immich
 hostctl app compose-all
 hostctl app tree homeassistant 3
 hostctl app read nginxproxymanager docker-compose.yml
+hostctl app find duplicati "*.sqlite" config
 hostctl app grep immich upload
+```
+
+### /DATA content inspection
+
+Use these read-only groups for fixed `/DATA` roots outside AppData:
+
+```bash
+hostctl documents ls [relative-path]
+hostctl documents tree [relative-path] [depth]
+hostctl documents read <relative-file> [lines]
+hostctl documents find <filename-pattern> [relative-path]
+hostctl documents grep <pattern> [relative-path]
+hostctl documents stat [relative-path]
+hostctl documents du [relative-path] [depth]
+hostctl documents recent [relative-path] [count]
+
+hostctl downloads ls [relative-path]
+hostctl downloads tree [relative-path] [depth]
+hostctl downloads read <relative-file> [lines]
+hostctl downloads find <filename-pattern> [relative-path]
+hostctl downloads grep <pattern> [relative-path]
+hostctl downloads stat [relative-path]
+hostctl downloads du [relative-path] [depth]
+hostctl downloads recent [relative-path] [count]
+
+hostctl media ls [relative-path]
+hostctl media tree [relative-path] [depth]
+hostctl media read <relative-file> [lines]
+hostctl media find <filename-pattern> [relative-path]
+hostctl media grep <pattern> [relative-path]
+hostctl media stat [relative-path]
+hostctl media du [relative-path] [depth]
+hostctl media recent [relative-path] [count]
+
+hostctl backup ls [relative-path]
+hostctl backup tree [relative-path] [depth]
+hostctl backup read <relative-file> [lines]
+hostctl backup find <filename-pattern> [relative-path]
+hostctl backup grep <pattern> [relative-path]
+hostctl backup stat [relative-path]
+hostctl backup du [relative-path] [depth]
+hostctl backup recent [relative-path] [count]
+
+hostctl scripts ls [relative-path]
+hostctl scripts tree [relative-path] [depth]
+hostctl scripts read <relative-file> [lines]
+hostctl scripts find <filename-pattern> [relative-path]
+hostctl scripts grep <pattern> [relative-path]
+hostctl scripts stat [relative-path]
+hostctl scripts du [relative-path] [depth]
+hostctl scripts recent [relative-path] [count]
+```
+
+Examples:
+
+```bash
+hostctl documents ls
+hostctl downloads find "*.nzb"
+hostctl media tree Movies 2
+hostctl backup stat nightly
+hostctl scripts read maintenance/cleanup.sh
 ```
 
 ### Cron jobs
