@@ -401,7 +401,7 @@ list_compose_dirs() {
     -printf '%h\n' 2>/dev/null | sort -u
 }
 
-app_dir() {
+app_base_dir() {
   local app="${1:-}"
   valid_name "$app" || die "Invalid app name: $app"
 
@@ -409,7 +409,7 @@ app_dir() {
   local root_real
   root_real="$(realpath "$APP_ROOT")"
 
-  if [[ -d "$direct" ]] && compose_file_for_dir "$direct" >/dev/null 2>&1; then
+  if [[ -d "$direct" ]]; then
     local direct_real
     direct_real="$(realpath "$direct")"
     [[ "$direct_real" == "$root_real"/* ]] || die "App path escapes APP_ROOT"
@@ -426,7 +426,7 @@ app_dir() {
   done < <(list_compose_dirs)
 
   if [[ "${#matches[@]}" -eq 0 ]]; then
-    die "App folder not found or has no Compose file: $app"
+    die "App folder not found under APP_ROOT: $app"
   fi
 
   if [[ "${#matches[@]}" -gt 1 ]]; then
@@ -439,12 +439,19 @@ app_dir() {
   printf '%s' "${matches[0]}"
 }
 
+app_dir() {
+  local dir
+  dir="$(app_base_dir "$1")"
+  compose_file_for_dir "$dir" >/dev/null 2>&1 || die "App folder has no Compose file: $1"
+  printf '%s' "$dir"
+}
+
 safe_app_path() {
   local app="$1"
   local rel="${2:-.}"
   local dir target
 
-  dir="$(app_dir "$app")"
+  dir="$(app_base_dir "$app")"
 
   [[ "$rel" != /* ]] || die "Path must be relative to the app folder"
   [[ "$rel" != *$'\0'* ]] || die "Invalid path"
@@ -572,9 +579,7 @@ app_cmd() {
 
   case "$action" in
     list)
-      while IFS= read -r d; do
-        basename "$d"
-      done < <(list_compose_dirs)
+      find "$APP_ROOT" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null | sort -u
       ;;
 
     inventory)
@@ -583,9 +588,9 @@ app_cmd() {
         local app size compose
         app="$(basename "$d")"
         size="$(du -sh "$d" 2>/dev/null | awk '{print $1}')"
-        compose="$(compose_file_for_dir "$d")"
+        compose="$(compose_file_for_dir "$d" || true)"
         printf '%s\t%s\t%s\n' "$app" "${size:-?}" "$compose"
-      done < <(list_compose_dirs)
+      done < <(find "$APP_ROOT" -mindepth 1 -maxdepth 1 -type d -print 2>/dev/null | sort -u)
       ;;
 
     sizes)
@@ -1417,6 +1422,10 @@ Prefer read-only diagnostic commands first. Do not suggest destructive commands 
 ## AppData / Compose app commands
 
 Use these for app folders under `/DATA/AppData`, or the configured `APP_ROOT`.
+
+Commands like `app ls`, `app tree`, `app read`, `app find`, and `app grep` work for plain app folders even if CasaOS manages the Compose file elsewhere.
+
+Commands like `app ps`, `app logs`, `app config`, `app compose`, `app start`, `app stop`, `app restart`, and `app update` still require a Compose file inside the app folder.
 
 - `hostctl app list`
 - `hostctl app inventory`
