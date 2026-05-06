@@ -225,6 +225,15 @@ generate_password() {
   fi
 }
 
+env_file_value() {
+  local file="$1"
+  local key="$2"
+
+  [[ -f "$file" ]] || return 1
+
+  awk -F= -v key="$key" '$1 == key { sub(/^[^=]*=/, ""); print; exit }' "$file"
+}
+
 compose_cmd() {
   if docker compose version >/dev/null 2>&1; then
     docker compose "$@"
@@ -252,7 +261,9 @@ init_prompt_tty
 
 APP_OWNER_UID="${PUID:-${SUDO_UID:-1000}}"
 APP_OWNER_GID="${PGID:-${SUDO_GID:-1000}}"
-OPENCODE_PASSWORD="${OPENCODE_SERVER_PASSWORD:-$(generate_password)}"
+EXISTING_APP_ENV="${APP_DIR}/.env"
+EXISTING_OPENCODE_PASSWORD="$(env_file_value "$EXISTING_APP_ENV" "OPENCODE_SERVER_PASSWORD" || true)"
+OPENCODE_PASSWORD="${OPENCODE_SERVER_PASSWORD:-${EXISTING_OPENCODE_PASSWORD:-$(generate_password)}}"
 HOST_USER_HOME=""
 HOST_USER_GROUP=""
 HOST_USER_FALLBACKED=false
@@ -671,6 +682,18 @@ app_cmd() {
       head -n "$lines" "$target" | redact
       ;;
 
+    find)
+      local app pattern target
+      app="${1:-}"
+      pattern="${2:-}"
+      [[ -n "$pattern" ]] || die "Usage: app find <app> <filename-pattern> [relative-path]"
+      target="$(safe_app_path "$app" "${3:-.}")"
+
+      find "$target" \
+        \( -path '*/node_modules' -o -path '*/.git' -o -path '*/cache' -o -path '*/Cache' \) -prune -o \
+        -type f -name "$pattern" -print 2>/dev/null | head -300
+      ;;
+
     grep)
       local app pattern target
       app="${1:-}"
@@ -724,6 +747,7 @@ Usage:
   app ls <app> [relative-path]
   app tree <app> [depth]
   app read <app> <relative-file> [lines]
+  app find <app> <filename-pattern> [relative-path]
   app grep <app> <pattern> [relative-path]
   app start <app>
   app stop <app>
@@ -1291,6 +1315,7 @@ cat > "$APP_DIR/config/opencode.json" <<'CONFIG_EOF'
       "hostctl app ls *": "ask",
       "hostctl app tree *": "ask",
       "hostctl app read *": "ask",
+      "hostctl app find *": "ask",
       "hostctl app grep *": "ask",
       "hostctl app start *": "ask",
       "hostctl app stop *": "ask",
@@ -1405,6 +1430,7 @@ Use these for app folders under `/DATA/AppData`, or the configured `APP_ROOT`.
 - `hostctl app ls <app> [relative-path]`
 - `hostctl app tree <app> [depth]`
 - `hostctl app read <app> <relative-file> [lines]`
+- `hostctl app find <app> <filename-pattern> [relative-path]`
 - `hostctl app grep <app> <pattern> [relative-path]`
 - `hostctl app start <app>`
 - `hostctl app stop <app>`
@@ -1418,6 +1444,7 @@ Examples:
 - `hostctl app compose-all`
 - `hostctl app tree homeassistant 3`
 - `hostctl app read nginxproxymanager docker-compose.yml`
+- `hostctl app find duplicati "*.sqlite" config`
 
 ## Cron commands
 
