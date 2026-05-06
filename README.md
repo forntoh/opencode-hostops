@@ -277,173 +277,92 @@ This wrapper does not install OpenCode on the host. It starts the container if n
 
 <details>
 
-<summary>Using hostctl</summary>
+<summary>Using OpenCode Naturally</summary>
 
-## Using `hostctl`
+## Using OpenCode naturally
 
-`hostctl` is the only host operations command OpenCode should use.
+Talk to OpenCode in plain language.
 
-### Health checks
+It should use the `hostctl` gateway internally when it needs host access, but you generally should not need to type the raw `hostctl` commands yourself.
 
-```bash
-hostctl health summary
-hostctl health disk
-hostctl health memory
-hostctl health services
-hostctl health docker
-hostctl health network
+### Server health
+
+```text
+Give me a quick health summary of this server, including disk, memory, and container status.
+
+Check whether anything on this server looks unhealthy.
+
+Please investigate why the root filesystem is full, but do not delete anything yet.
 ```
 
-### Docker container operations
+### Docker containers
 
-```bash
-hostctl docker list
-hostctl docker all
-hostctl docker unhealthy
-hostctl docker status <container>
-hostctl docker logs <container> [lines]
-hostctl docker inspect <container>
-hostctl docker stats
-hostctl docker start <container>
-hostctl docker stop <container>
-hostctl docker restart <container>
+```text
+Show me all running containers and tell me if any look unhealthy.
+
+Please inspect the flaresolverr container and summarize why it is restarting.
+
+Check the logs for crontab-ui and tell me why it is unhealthy.
+
+Restart the flaresolverr container after explaining what you are about to do.
 ```
 
-### AppData and Compose inspection
+### AppData apps
 
-```bash
-hostctl app list
-hostctl app inventory
-hostctl app sizes
-hostctl app size <app>
-hostctl app ps <app>
-hostctl app logs <app> [lines]
-hostctl app config <app>
-hostctl app compose <app>
-hostctl app compose-all
-hostctl app ls <app> [relative-path]
-hostctl app tree <app> [depth]
-hostctl app read <app> <relative-file> [lines]
-hostctl app find <app> <filename-pattern> [relative-path]
-hostctl app grep <app> <pattern> [relative-path]
-hostctl app start <app>
-hostctl app stop <app>
-hostctl app restart <app>
-hostctl app update <app>
+```text
+What apps do you see under AppData on this machine? Give me a short inventory.
+
+Please inspect the slskd AppData folder, find slskd.yml, and review its config.
+
+Check the Immich app folder and show me the Compose configuration it is using.
+
+Look through the Duplicati app data and list any sqlite, db, json, or xml files you find under config.
+
+Please check why the Sonarr app is failing, and summarize the relevant logs and configuration.
 ```
 
-Examples:
+### Documents, Downloads, Media, Backup, and Scripts
 
-```bash
-hostctl app inventory
-hostctl app compose immich
-hostctl app compose-all
-hostctl app tree homeassistant 3
-hostctl app read nginxproxymanager docker-compose.yml
-hostctl app find duplicati "*.sqlite" config
-hostctl app grep immich upload
+```text
+Please inspect the Scripts directory and list the shell scripts you find.
+
+Look in Downloads and summarize the newest files.
+
+Show me the top-level folders under Media.
+
+Search the Backup directory for sqlite files and tell me what is there.
+
+Find any NZB files in Downloads.
 ```
 
-### /DATA content inspection
+### Scheduling and automation
 
-Use these read-only groups for fixed `/DATA` roots outside AppData:
+```text
+List the OpenCode-managed cron jobs on this server.
 
-```bash
-hostctl documents ls [relative-path]
-hostctl documents tree [relative-path] [depth]
-hostctl documents read <relative-file> [lines]
-hostctl documents find <filename-pattern> [relative-path]
-hostctl documents grep <pattern> [relative-path]
-hostctl documents stat [relative-path]
-hostctl documents du [relative-path] [depth]
-hostctl documents recent [relative-path] [count]
+Create a weekly maintenance job to update Sonarr every Sunday at 3 AM, but explain the change before doing it.
 
-hostctl downloads ls [relative-path]
-hostctl downloads tree [relative-path] [depth]
-hostctl downloads read <relative-file> [lines]
-hostctl downloads find <filename-pattern> [relative-path]
-hostctl downloads grep <pattern> [relative-path]
-hostctl downloads stat [relative-path]
-hostctl downloads du [relative-path] [depth]
-hostctl downloads recent [relative-path] [count]
-
-hostctl media ls [relative-path]
-hostctl media tree [relative-path] [depth]
-hostctl media read <relative-file> [lines]
-hostctl media find <filename-pattern> [relative-path]
-hostctl media grep <pattern> [relative-path]
-hostctl media stat [relative-path]
-hostctl media du [relative-path] [depth]
-hostctl media recent [relative-path] [count]
-
-hostctl backup ls [relative-path]
-hostctl backup tree [relative-path] [depth]
-hostctl backup read <relative-file> [lines]
-hostctl backup find <filename-pattern> [relative-path]
-hostctl backup grep <pattern> [relative-path]
-hostctl backup stat [relative-path]
-hostctl backup du [relative-path] [depth]
-hostctl backup recent [relative-path] [count]
-
-hostctl scripts ls [relative-path]
-hostctl scripts tree [relative-path] [depth]
-hostctl scripts read <relative-file> [lines]
-hostctl scripts find <filename-pattern> [relative-path]
-hostctl scripts grep <pattern> [relative-path]
-hostctl scripts stat [relative-path]
-hostctl scripts du [relative-path] [depth]
-hostctl scripts recent [relative-path] [count]
+Show me the system timers and failed services.
 ```
 
-Examples:
+### When you do want the raw command names
 
-```bash
-hostctl documents ls
-hostctl downloads find "*.nzb"
-hostctl media tree Movies 2
-hostctl backup stat nightly
-hostctl scripts read maintenance/cleanup.sh
+OpenCode should use `hostctl` internally for host access. The main command groups available through the tool are:
+
+```text
+health
+docker
+app
+documents
+downloads
+media
+backup
+scripts
+cron
+system
 ```
 
-### Cron jobs
-
-The helper manages only cron jobs created with the `opencode-` prefix under `/etc/cron.d`.
-
-```bash
-hostctl cron list
-hostctl cron system
-hostctl cron show <name>
-hostctl cron create <name> "<5-field-schedule>" <allowed-command...>
-hostctl cron update <name> "<5-field-schedule>" <allowed-command...>
-hostctl cron delete <name>
-```
-
-Allowed cron actions:
-
-```bash
-docker start <container>
-docker stop <container>
-docker restart <container>
-app start <app>
-app stop <app>
-app restart <app>
-app update <app>
-health summary
-```
-
-Example:
-
-```bash
-hostctl cron create restart-flaresolverr "0 4 * * *" docker restart flaresolverr
-```
-
-### System diagnostics
-
-```bash
-hostctl system failed-services
-hostctl system timers
-hostctl system journal <unit.service> [lines]
-```
+The full command reference lives in `docs/COMMANDS.md`.
 
 </details>
 
@@ -483,46 +402,44 @@ This keeps the workflow useful while avoiding unrestricted host access.
 
 ### Inspect all managed apps
 
-```bash
-hostctl app inventory
+```text
+What apps do you see under AppData on this machine? Give me a short inventory.
 ```
 
 ### Review every Compose file
 
-```bash
-hostctl app compose-all
+```text
+Please review every Compose file you can find under AppData and summarize anything unusual.
 ```
 
 ### Check why an app is failing
 
-```bash
-hostctl app ps immich
-hostctl app logs immich 300
-hostctl app compose immich
+```text
+Please check why the Immich app is failing and summarize its status, logs, and Compose configuration.
 ```
 
 ### Restart a container
 
-```bash
-hostctl docker restart flaresolverr
+```text
+Please restart the flaresolverr container, but explain what you are about to do first.
 ```
 
 ### Restart an app stack
 
-```bash
-hostctl app restart sonarr
+```text
+Please restart the Sonarr app stack after explaining why that is the right next step.
 ```
 
 ### Update an app stack
 
-```bash
-hostctl app update prowlarr
+```text
+Please update the Prowlarr app stack, but summarize what will change before doing it.
 ```
 
 ### Create a scheduled maintenance job
 
-```bash
-hostctl cron create weekly-sonarr-update "0 3 * * 0" app update sonarr
+```text
+Please create a weekly maintenance job to update Sonarr every Sunday at 3 AM, but explain the schedule and action before making the change.
 ```
 
 </details>
