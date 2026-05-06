@@ -1035,7 +1035,7 @@ cron_safe_command() {
 
     app:start|app:stop|app:restart|app:update)
       [[ $# -eq 3 ]] || die "Cron app command must be: app start|stop|restart|update <app>"
-      app_dir "$3" >/dev/null
+      resolve_compose_file "$3" >/dev/null
       ;;
 
     health:summary)
