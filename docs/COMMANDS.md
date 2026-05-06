@@ -30,6 +30,14 @@ hostctl docker restart <container>
 
 ## AppData / Compose apps
 
+`app update`, `app ps`, `app logs`, `app config`, `app compose`, `app start`, `app stop`, and `app restart` all resolve the Compose file using a three-step lookup:
+
+1. Explicit entry in the compose registry (`APP_DIR/config/compose-registry.conf`)
+2. In-folder Compose file under `APP_ROOT/<app>/`
+3. Auto-discover via `docker inspect` label, then cache the result in the registry
+
+Use `app register` to set or override the path manually.
+
 ```bash
 hostctl app list
 hostctl app inventory
@@ -43,11 +51,13 @@ hostctl app compose-all
 hostctl app ls <app> [relative-path]
 hostctl app tree <app> [depth]
 hostctl app read <app> <relative-file> [lines]
+hostctl app find <app> <filename-pattern> [relative-path]
 hostctl app grep <app> <pattern> [relative-path]
 hostctl app start <app>
 hostctl app stop <app>
 hostctl app restart <app>
 hostctl app update <app>
+hostctl app register <app> <path-to-docker-compose.yml>
 ```
 
 ## Cron

@@ -57,9 +57,15 @@ Prefer read-only diagnostic commands first. Do not suggest destructive commands 
 
 Use these for app folders under `/DATA/AppData`, or the configured `APP_ROOT`.
 
-Commands like `app ls`, `app tree`, `app read`, `app find`, and `app grep` work for plain app folders even if CasaOS manages the Compose file elsewhere.
+Commands like `app ls`, `app tree`, `app read`, `app find`, and `app grep` work for plain app folders even if the Compose file lives elsewhere.
 
-Commands like `app ps`, `app logs`, `app config`, `app compose`, `app start`, `app stop`, `app restart`, and `app update` still require a Compose file inside the app folder.
+Commands like `app ps`, `app logs`, `app config`, `app compose`, `app start`, `app stop`, `app restart`, and `app update` resolve the Compose file automatically:
+
+1. Check the compose registry at `APP_DIR/config/compose-registry.conf` for an explicit entry
+2. Fall back to an in-folder Compose file under `APP_ROOT/<app>/`
+3. Auto-discover via `docker inspect` label and cache the result in the registry
+
+If none of these work, use `app register <app> <path>` to set the path explicitly.
 
 - `hostctl app list`
 - `hostctl app inventory`
@@ -79,6 +85,7 @@ Commands like `app ps`, `app logs`, `app config`, `app compose`, `app start`, `a
 - `hostctl app stop <app>`
 - `hostctl app restart <app>`
 - `hostctl app update <app>`
+- `hostctl app register <app> <path-to-docker-compose.yml>`
 
 Examples:
 
@@ -88,6 +95,7 @@ Examples:
 - `hostctl app tree homeassistant 3`
 - `hostctl app read nginxproxymanager docker-compose.yml`
 - `hostctl app find duplicati "*.sqlite" config`
+- `hostctl app register sonarr /var/lib/casaos/apps/sonarr/docker-compose.yml`
 
 ## /DATA content commands
 

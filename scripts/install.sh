@@ -281,6 +281,7 @@ SSH_ENTRYPOINT_PATH="$(pick_install_path "SSH entrypoint" "$SSH_ENTRYPOINT_PATH"
 HOSTCTL_PATH="$(pick_install_path "hostctl wrapper" "$HOSTCTL_PATH" "$APP_DIR/bin/hostctl")"
 HOST_USER_HOME="$(pick_install_path "host user home" "/home/$HOST_USER" "$APP_DIR/system/$HOST_USER-home")"
 DOCKER_CONFIG_PATH="$(pick_install_path "docker config" "$DOCKER_CONFIG_PATH" "$APP_DIR/system/docker-config")"
+COMPOSE_REGISTRY_PATH="${COMPOSE_REGISTRY_PATH:-$APP_DIR/config/compose-registry.conf}"
 if [[ "$INSTALL_OPENCODE_LAUNCHER" == "true" ]]; then
   OPENCODE_LAUNCHER_PATH="$(pick_install_path "opencode launcher" "$OPENCODE_LAUNCHER_PATH" "$APP_DIR/bin/opencode")"
 fi
@@ -352,6 +353,7 @@ if [[ -f "$HOSTOPS_CONFIG_PATH" ]]; then
 fi
 
 APP_ROOT="${OPENCODE_APP_ROOT:-/DATA/AppData}"
+COMPOSE_REGISTRY="__COMPOSE_REGISTRY_PATH__"
 CRON_PREFIX="/etc/cron.d/opencode-"
 CRON_LOG="/var/log/opencode-managed-cron.log"
 
@@ -393,6 +395,59 @@ compose_file_for_dir() {
   done
 
   return 1
+}
+
+# Resolve the Compose file for a given app name using a three-step lookup:
+#   1. Explicit entry in COMPOSE_REGISTRY (key=value file)
+#   2. In-folder Compose file under APP_ROOT/<app>/
+#   3. Auto-discover via docker inspect label, then cache the result in the registry
+resolve_compose_file() {
+  local app="$1"
+
+  # 1. Registry override
+  if [[ -f "$COMPOSE_REGISTRY" ]]; then
+    local entry
+    entry="$(grep "^${app}=" "$COMPOSE_REGISTRY" 2>/dev/null | cut -d= -f2- || true)"
+    if [[ -n "$entry" && -f "$entry" ]]; then
+      printf '%s' "$entry"
+      return 0
+    fi
+  fi
+
+  # 2. In-folder Compose file (existing behaviour)
+  local base
+  base="$(app_base_dir "$app" 2>/dev/null || true)"
+  if [[ -n "$base" ]]; then
+    local in_folder
+    in_folder="$(compose_file_for_dir "$base" 2>/dev/null || true)"
+    if [[ -n "$in_folder" ]]; then
+      printf '%s' "$in_folder"
+      return 0
+    fi
+  fi
+
+  # 3. Auto-discover via docker inspect label and cache it
+  local workdir
+  workdir="$(docker inspect "$app" \
+    --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' \
+    2>/dev/null || true)"
+  if [[ -n "$workdir" ]]; then
+    local discovered
+    discovered="$(compose_file_for_dir "$workdir" 2>/dev/null || true)"
+    if [[ -n "$discovered" ]]; then
+      mkdir -p "$(dirname "$COMPOSE_REGISTRY")"
+      # Upsert: remove any stale entry then append the discovered one
+      local tmp="${COMPOSE_REGISTRY}.tmp"
+      grep -v "^${app}=" "$COMPOSE_REGISTRY" 2>/dev/null > "$tmp" || true
+      echo "${app}=${discovered}" >> "$tmp"
+      mv "$tmp" "$COMPOSE_REGISTRY"
+      echo "INFO: auto-registered compose file for $app: $discovered" >&2
+      printf '%s' "$discovered"
+      return 0
+    fi
+  fi
+
+  die "No Compose file found for '$app'. Run: app register $app <path-to-docker-compose.yml>"
 }
 
 list_compose_dirs() {
@@ -504,14 +559,16 @@ forbidden_sensitive_path() {
 }
 
 compose_cmd() {
-  local dir="$1"
+  local file="$1"
   shift
+  local dir
+  dir="$(dirname "$file")"
   cd "$dir"
 
   if docker compose version >/dev/null 2>&1; then
-    docker compose "$@"
+    docker compose -f "$file" "$@"
   elif command -v docker-compose >/dev/null 2>&1; then
-    docker-compose "$@"
+    docker-compose -f "$file" "$@"
   else
     die "Neither docker compose nor docker-compose is available"
   fi
@@ -614,8 +671,8 @@ app_cmd() {
         local app size compose
         app="$(basename "$d")"
         size="$(du -sh "$d" 2>/dev/null | awk '{print $1}')"
-        compose="$(compose_file_for_dir "$d" || true)"
-        printf '%s\t%s\t%s\n' "$app" "${size:-?}" "$compose"
+        compose="$(resolve_compose_file "$app" 2>/dev/null || true)"
+        printf '%s\t%s\t%s\n' "$app" "${size:-?}" "${compose:-(none)}"
       done < <(list_app_dirs)
       ;;
 
@@ -630,35 +687,35 @@ app_cmd() {
       ;;
 
     ps)
-      local dir
-      dir="$(app_dir "${1:-}")"
-      compose_cmd "$dir" ps
+      local file
+      file="$(resolve_compose_file "${1:-}")"
+      compose_cmd "$file" ps
       ;;
 
     logs)
-      local dir lines
-      dir="$(app_dir "${1:-}")"
+      local file lines
+      file="$(resolve_compose_file "${1:-}")"
       lines="${2:-200}"
       [[ "$lines" =~ ^[0-9]+$ ]] || die "Lines must be a number"
       [[ "$lines" -le 5000 ]] || lines=5000
-      compose_cmd "$dir" logs --tail "$lines" 2>&1 | redact
+      compose_cmd "$file" logs --tail "$lines" 2>&1 | redact
       ;;
 
     config)
-      local dir
-      dir="$(app_dir "${1:-}")"
-      compose_cmd "$dir" config | redact
+      local file
+      file="$(resolve_compose_file "${1:-}")"
+      compose_cmd "$file" config | redact
       ;;
 
     compose)
-      local dir file
-      dir="$(app_dir "${1:-}")"
-      file="$(compose_file_for_dir "$dir")"
+      local file
+      file="$(resolve_compose_file "${1:-}")"
       echo "### $file"
       cat "$file" | redact
       ;;
 
     compose-all)
+      # In-folder Compose files
       while IFS= read -r d; do
         local file
         file="$(compose_file_for_dir "$d")"
@@ -667,6 +724,21 @@ app_cmd() {
         echo "### FILE: $file"
         cat "$file" | redact
       done < <(list_compose_dirs)
+      # Registry-only entries (apps whose Compose file lives outside APP_ROOT)
+      if [[ -f "$COMPOSE_REGISTRY" ]]; then
+        while IFS='=' read -r rapp rfile; do
+          [[ -n "$rapp" && -n "$rfile" && -f "$rfile" ]] || continue
+          # Skip if already shown via in-folder scan
+          local rdir
+          rdir="$(dirname "$rfile")"
+          if [[ "$rdir" != "$APP_ROOT"/* ]]; then
+            echo
+            echo "### APP: $rapp (registry)"
+            echo "### FILE: $rfile"
+            cat "$rfile" | redact
+          fi
+        done < "$COMPOSE_REGISTRY"
+      fi
       ;;
 
     ls)
@@ -749,18 +821,33 @@ app_cmd() {
       ;;
 
     start|stop|restart)
-      local dir
-      dir="$(app_dir "${1:-}")"
-      compose_cmd "$dir" "$action"
-      compose_cmd "$dir" ps
+      local file
+      file="$(resolve_compose_file "${1:-}")"
+      compose_cmd "$file" "$action"
+      compose_cmd "$file" ps
       ;;
 
     update)
-      local dir
-      dir="$(app_dir "${1:-}")"
-      compose_cmd "$dir" pull
-      compose_cmd "$dir" up -d --remove-orphans
-      compose_cmd "$dir" ps
+      local file
+      file="$(resolve_compose_file "${1:-}")"
+      compose_cmd "$file" pull
+      compose_cmd "$file" up -d --remove-orphans
+      compose_cmd "$file" ps
+      ;;
+
+    register)
+      local app path
+      app="${1:-}"
+      path="${2:-}"
+      valid_name "$app" || die "Invalid app name: $app"
+      [[ -n "$path" ]] || die "Usage: app register <app> <path-to-docker-compose.yml>"
+      [[ -f "$path" ]] || die "File not found: $path"
+      mkdir -p "$(dirname "$COMPOSE_REGISTRY")"
+      local tmp="${COMPOSE_REGISTRY}.tmp"
+      grep -v "^${app}=" "$COMPOSE_REGISTRY" 2>/dev/null > "$tmp" || true
+      echo "${app}=${path}" >> "$tmp"
+      mv "$tmp" "$COMPOSE_REGISTRY"
+      echo "Registered: $app -> $path"
       ;;
 
     *)
@@ -784,6 +871,7 @@ Usage:
   app stop <app>
   app restart <app>
   app update <app>
+  app register <app> <compose-path>
 HELP
       exit 1
       ;;
@@ -1217,6 +1305,7 @@ dispatch "$@"
 HOST_HELPER_EOF
 sed -i "s|__CONFIG_PATH__|$(escape_sed_replacement "$CONFIG_PATH")|g" "$HOST_HELPER_PATH"
 sed -i "s|__DOCKER_CONFIG_PATH__|$(escape_sed_replacement "$DOCKER_CONFIG_PATH")|g" "$HOST_HELPER_PATH"
+sed -i "s|__COMPOSE_REGISTRY_PATH__|$(escape_sed_replacement "$COMPOSE_REGISTRY_PATH")|g" "$HOST_HELPER_PATH"
 sed -i "s|__HOST_HELPER_PATH__|$(escape_sed_replacement "$HOST_HELPER_PATH")|g" "$HOST_HELPER_PATH"
 chmod 755 "$HOST_HELPER_PATH"
 
@@ -1800,6 +1889,7 @@ printf '%s\n' "Host helper: $HOST_HELPER_PATH"
 printf '%s\n' "SSH entrypoint: $SSH_ENTRYPOINT_PATH"
 printf '%s\n' "Hostctl wrapper: $HOSTCTL_PATH"
 printf '%s\n' "Docker config: $DOCKER_CONFIG_PATH"
+printf '%s\n' "Compose registry: $COMPOSE_REGISTRY_PATH"
 printf '%s\n' "Restricted host user home: $HOST_USER_HOME"
 if [[ "$HOST_USER_FALLBACKED" == "true" ]]; then
   printf '%s\n' "Restricted host user: $HOST_USER (existing account fallback on read-only host)"
