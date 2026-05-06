@@ -79,6 +79,8 @@ Allowed cron payloads:
 docker start <container>
 docker stop <container>
 docker restart <container>
+docker builder-prune
+docker image-prune
 app start <app>
 app stop <app>
 app restart <app>

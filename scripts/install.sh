@@ -1043,6 +1043,10 @@ cron_safe_command() {
       safe_container "$3" >/dev/null
       ;;
 
+    docker:builder-prune|docker:image-prune)
+      [[ $# -eq 2 ]] || die "Cron docker prune commands take no extra arguments"
+      ;;
+
     app:start|app:stop|app:restart|app:update)
       [[ $# -eq 3 ]] || die "Cron app command must be: app start|stop|restart|update <app>"
       resolve_compose_file "$3" >/dev/null

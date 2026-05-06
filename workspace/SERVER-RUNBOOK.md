@@ -172,6 +172,8 @@ Allowed cron actions:
 - `docker start <container>`
 - `docker stop <container>`
 - `docker restart <container>`
+- `docker builder-prune`
+- `docker image-prune`
 - `app start <app>`
 - `app stop <app>`
 - `app restart <app>`
@@ -181,6 +183,7 @@ Allowed cron actions:
 Examples:
 
 - `hostctl cron create restart-flaresolverr "0 4 * * *" docker restart flaresolverr`
+- `hostctl cron create weekly-docker-builder-prune "0 5 * * 0" docker builder-prune`
 - `hostctl cron create weekly-sonarr-update "0 3 * * 0" app update sonarr`
 - `hostctl cron delete restart-flaresolverr`
 
