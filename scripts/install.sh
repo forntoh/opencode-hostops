@@ -398,7 +398,11 @@ compose_file_for_dir() {
 list_compose_dirs() {
   find "$APP_ROOT" -mindepth 2 -maxdepth 4 -type f \
     \( -name docker-compose.yml -o -name docker-compose.yaml -o -name compose.yml -o -name compose.yaml \) \
-    -printf '%h\n' 2>/dev/null | sort -u
+    -exec dirname {} \; 2>/dev/null | sort -u
+}
+
+list_app_dirs() {
+  find "$APP_ROOT" -mindepth 1 -maxdepth 1 -type d -print 2>/dev/null | sort -u
 }
 
 app_base_dir() {
@@ -454,7 +458,7 @@ safe_app_path() {
   dir="$(app_base_dir "$app")"
 
   [[ "$rel" != /* ]] || die "Path must be relative to the app folder"
-  [[ "$rel" != *$'\0'* ]] || die "Invalid path"
+  [[ -n "$rel" ]] || die "Invalid path"
 
   target="$(realpath -m "$dir/$rel")"
 
@@ -579,7 +583,9 @@ app_cmd() {
 
   case "$action" in
     list)
-      find "$APP_ROOT" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null | sort -u
+      while IFS= read -r d; do
+        basename "$d"
+      done < <(list_app_dirs)
       ;;
 
     inventory)
@@ -590,7 +596,7 @@ app_cmd() {
         size="$(du -sh "$d" 2>/dev/null | awk '{print $1}')"
         compose="$(compose_file_for_dir "$d" || true)"
         printf '%s\t%s\t%s\n' "$app" "${size:-?}" "$compose"
-      done < <(find "$APP_ROOT" -mindepth 1 -maxdepth 1 -type d -print 2>/dev/null | sort -u)
+      done < <(list_app_dirs)
       ;;
 
     sizes)
